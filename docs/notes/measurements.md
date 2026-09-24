@@ -195,3 +195,60 @@ AI_MOCK=1 试跑：60 条 35.5 s，全部记为 `-`（mock 流没有 usage 帧�
 - `#rerender-memo`：`memo(ChatBubble)` + 下标 key 的重渲染数据（第 3 节；`ChatBubble.tsx` 现有注释可补锚点）。
 - `#bundle-size`：提示词移到后端 + 去依赖 + 子集化的产物对比（第 4 节；`characters.py` 的 `#prompts-backend` 可引用同一表）。
 - `#first-bubble`、`#prompt-tokens`：两份等真实 Key 的数据，脚本与复现命令在第 5 节。
+
+## 6. 真实 DeepSeek 数据（2026-09-24，主会话补测）
+
+后端配真实 Key（`deepseek-flash`，`https://api.deepseek.com`），前端 `pnpm build` 后 `vite preview` 在 5182，后端 8030，临时 SQLite，本机网络直连（不走代理）。
+
+### 6.1 发现：V4 系列默认开启思考模式，流式分段失效
+
+**现象**：第一次跑 `first-bubble.mjs`（后端尚未关闭思考），5 轮首个气泡 5756 / 4926 / 1407 / 5017 / 5029 ms，全文完成 5757 / 4926 / 1407 / 5017 / 5030 ms——首个气泡和全文几乎同时出现，中位数都是 5017 ms，"流式按行"对首句毫无提升。
+
+**定位**：直接用 httpx 请求上游（`max_tokens: 300`，`stream: true`），逐帧记录 delta 类型与到达时间：
+
+| 请求参数                         | 帧统计                                    | 首个 content 帧 | [DONE]  | usage                              |
+| -------------------------------- | ----------------------------------------- | --------------- | ------- | ---------------------------------- |
+| 默认（不传 thinking）            | `reasoning_content` × 300，`content` × 0  | 无              | 2056 ms | completion 300，其中 reasoning 300 |
+| `reasoning_effort: "low"`        | `reasoning_content` × 271，`content` × 28 | 1945 ms         | 1948 ms | completion 300，其中 reasoning 271 |
+| `thinking: {"type": "disabled"}` | `content` × 46                            | 765 ms          | 1127 ms | completion 46                      |
+
+**根因**：`deepseek-flash`（V4.1 Flash）默认开启思考模式（官方文档 [Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)）。思考 token 计入 `max_tokens`：预算小时正文直接为空；正文要等思考结束后才开始，而且实测 28 个 content delta 在 3 ms 内到达——答案是整段一次性吐出的，前端按行分段自然全部落在最后一刻。角色闲聊不需要推理，思考只带来延迟和费用。
+
+**修复**：后端请求体加 `"thinking": {"type": "disabled"}`（`backend/app/ai.py`，`ping` 同样关闭），`docs/api.md` §3 同步，测试断言该字段。
+
+**验证**：见 6.2；直连上游对比：首个正文 1945 ms → 765 ms，completion token 300 → 46。
+
+### 6.2 首个 AI 气泡出现时间（关闭思考后）
+
+`node scripts/measure/first-bubble.mjs --base http://localhost:5182 --api http://localhost:8030 --user demo --password demo123 --character 陈千语 --prompt "你好，简单介绍一下你自己吧，分三句话说，每句话单独一行。" --runs 5`
+
+| 轮次       | 网络：首个 SSE 数据块 | Enter → 首个气泡（t1） | Enter → 全文完成（t2） |
+| ---------- | --------------------- | ---------------------- | ---------------------- |
+| 1          | 531 ms                | 751 ms                 | 990 ms                 |
+| 2          | 306 ms                | 499 ms                 | 710 ms                 |
+| 3          | 688 ms                | 969 ms                 | 1203 ms                |
+| 4          | 579 ms                | 772 ms                 | 1064 ms                |
+| 5          | 477 ms                | 728 ms                 | 1045 ms                |
+| **中位数** | **531 ms**            | **751 ms**             | **1045 ms**            |
+
+- 与关闭思考前对比：首个气泡 5017 ms → 751 ms（−85%）；全文完成 5017 ms → 1045 ms。
+- 流式按行 vs 原项目"等全文再显示"：首句提前 294 ms（回复只有三行、约 80 token，回复越长提前越多）。
+- 首个数据块 531 ms 到首个气泡 751 ms 之间的 220 ms，是等第一行写完（第一个 `\n`）的时间。
+- 脚本首版还想用 CDP 的 `loadingFinished` 记录响应结束时刻，但多数轮次收不到该事件（前端处理完 `[DONE]` 后释放了流），已删掉这一列，只保留"首个数据块"；修正后重跑一次：首个数据块 583 ms、首个气泡 718 ms、全文 1006 ms，与上表一致。
+
+### 6.3 prompt_tokens 曲线与前缀缓存命中（60 条连续消息）
+
+`python3 scripts/measure/prompt-tokens.py --api http://localhost:8030 --user demo --password demo123 --character 陈千语 --count 60`
+
+| 第 n 条 | prompt_tokens | 缓存命中（prompt_cache_hit_tokens） |
+| ------- | ------------- | ----------------------------------- |
+| 1       | 4894          | 4736                                |
+| 10      | 5227          | 4992                                |
+| 20      | 5651          | 5504                                |
+| 21      | 5683          | 4864                                |
+| 40      | 5722          | 4864                                |
+| 60      | 5704          | 4864                                |
+
+- 第 1–20 条每条约 +38 token 线性增长；第 21 条起 40 条窗口填满，之后在 5700 上下波动（窗口滑动，旧消息被新消息替换）。按线性外推，不截断时第 60 条约 4894 + 59 × 38 ≈ 7100 token，截断后 5704（−20%），差距随会话继续拉大。
+- 基线 4894 token 里绝大部分是两条 system（固定规则 + 世界观 + 角色提示词）；DeepSeek 按 128 token 块统计前缀缓存命中，第 1–20 条命中随会话增长（4736 → 5504）；窗口开始滑动后，每轮最前面的对话被丢弃、前缀改变，命中回落到 4864 并保持——system 部分一直命中缓存，只有对话部分需要按未命中价计费。
+- 关闭思考前的同一曲线（首次测量）：4919 → 5227（#10）→ 5524（#20）→ 5597（#40）→ 5649（#60），形状一致；当时第 11 条遇到一次空原因的上游错误 `上游请求失败：`，已把异常类名补进原因文案（`backend/app/ai.py::_transport_message`）。

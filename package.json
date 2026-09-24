@@ -16,6 +16,7 @@
     "test": "pnpm --filter frontend test",
     "build": "pnpm --filter frontend build",
     "e2e": "pnpm --filter e2e test",
+    "check:docs": "node scripts/check-docs.mjs",
     "format": "prettier --write ."
   },
   "lint-staged": {

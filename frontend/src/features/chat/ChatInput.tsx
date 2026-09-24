@@ -139,6 +139,8 @@ export function ChatInput() {
           src={MATERIALS.choiceTopDeco}
           alt=""
         />
+        {/* 💡 contenteditable 而非 textarea：文字中间要显示表情图片；换行 / 粘贴走 execCommand 保留原生撤销栈，
+            发送时由 emojiHtml 把 DOM 序列化成含 [sns_emoji_NNN] token 的纯文本，详见 docs/interview.md#contenteditable-emoji */}
         <div
           ref={inputRef}
           role="textbox"

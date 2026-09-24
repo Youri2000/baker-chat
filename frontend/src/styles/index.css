@@ -34,7 +34,9 @@
 }
 
 /* static：全部令牌无条件输出到 :root。默认只输出被工具类引用的变量，
-   而气泡 SVG 的 fill、内联 style 里的 var(--color-…) Tailwind 扫描不到，会拿到空值 */
+   而气泡 SVG 的 fill、内联 style 里的 var(--color-…) Tailwind 扫描不到，会拿到空值。
+   💡 令牌是 CSS 与 SVG 共用颜色的唯一来源，状态样式走 data-* 变体、带参数的 mixin 走 @utility，
+   不再混用 SCSS，详见 docs/interview.md#tailwind-theme */
 @theme static {
   /* ---- 字体（$font-harmony / $font-bubble）---------------------------------- */
   --font-harmony:

@@ -95,7 +95,11 @@ class Message(Base):
 
 
 class ContextEntry(Base):
-    """发给 AI 的记忆条目，与可见消息分开存储，清空消息不影响它。"""
+    """发给 AI 的记忆条目，与可见消息分开存储，清空消息不影响它。
+
+    💡 与 Message 分表且只按条数截断（chat.py 取最近 40 条，不引入 tokenizer），
+    详见 docs/interview.md#context-window
+    """
 
     __tablename__ = "context_entries"
     __table_args__ = NO_ID_REUSE

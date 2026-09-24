@@ -1,11 +1,14 @@
 /**
- * @file 1920×1080 设计画布：按 min(innerWidth/1920, innerHeight/1080) 用 CSS zoom 等比缩放并居中。
- * 用 zoom 而不是 transform: scale，文字选择与命中测试不受影响；resize 用 rAF 节流。
+ * @file 1920×1080 设计画布：按 min(innerWidth/1920, innerHeight/1080) 用 CSS zoom 等比缩放并居中；resize 用 rAF 节流。
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { DESIGN_H, DESIGN_W } from '@/constants/design';
 
-/** 当前视口对应的缩放系数 */
+/**
+ * 当前视口对应的缩放系数。
+ * 💡 用 zoom 而非 transform: scale：zoom 参与布局，居中只需 flex，ResizeObserver / offsetWidth 量到的仍是
+ * 未缩放的 CSS px，文字选择与命中测试也不受影响，详见 docs/interview.md#zoom-canvas
+ */
 function computeZoom(): number {
   return Math.min(window.innerWidth / DESIGN_W, window.innerHeight / DESIGN_H);
 }

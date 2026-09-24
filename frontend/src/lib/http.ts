@@ -48,6 +48,8 @@ export function onUnauthorized(handler: () => void): void {
  * 校验响应状态：非 2xx 解析 `{detail}` 抛出 ApiError。
  * ⚠️ 带 token 的请求收到 401 = 登录已过期：清 token 并触发处理器；并发的多个 401 只触发一次。
  * 未带 token 的 401（登录接口密码错误）只是普通错误。
+ * 💡 按"请求是否带 token"而不是接口路径白名单区分两种 401：路径写进 lib 是业务泄漏；
+ * 处理器由 authStore 一次性注册，lib 不反向 import store，详见 docs/interview.md#jwt-401
  */
 export async function assertOk(res: Response, sentWithToken: boolean): Promise<void> {
   if (res.ok) return;

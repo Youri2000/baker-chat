@@ -2,7 +2,25 @@
 
 "终末地 BAKER 会话消息"角色聊天应用的 React + FastAPI 重写版：登录后与 29 个内置角色逐行流式对话，AI 由后端代理 DeepSeek，会话、消息与设置按用户存在服务端。
 
-> 截图：待线上部署后补充（登录页、角色列表 + 流式回复、设置对话框三张，放在 `docs/` 下并在此处引用）。
+## 截图
+
+以下四张为本地 `AI_MOCK=1` 运行时用 Playwright 在 1920×1080 视口截取，放在 `docs/screenshots/`。
+
+![登录页](docs/screenshots/login.png)
+
+登录页：用户名 + 密码，演示账号可一键填入。
+
+![主界面](docs/screenshots/chat.png)
+
+主界面：左侧 29 个角色主卡（展开"陈千语"并选中其会话），右侧我方消息与按行分段的三个 AI 气泡。
+
+![设置对话框](docs/screenshots/settings.png)
+
+设置 › 角色提示词：按角色查看、编辑并保存提示词（提示词只存在后端）。
+
+![对话管理对话框](docs/screenshots/manage.png)
+
+对话管理：对当前会话执行删除对话 / 清空消息 / 清空上下文。
 
 ## 架构
 
