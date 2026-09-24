@@ -1,7 +1,7 @@
 /**
  * @file 对话管理对话框（原 DeleteConfirmDialog.vue）：针对当前选中的会话提供删除对话 / 清空消息 /
  * 清空上下文，每个操作先进确认页。未选中会话时只显示提示文案；该角色只剩一个会话时删除按钮禁用。
- * 外壳用 DialogShell（348px），动作走 chatStore，失败由 store 内部 toast。
+ * 外壳用 DialogShell（348px，原 dialog-shell(dc) 的标题下边距 10px），动作走 chatStore，失败由 store 内部 toast。
  */
 import { useState } from 'react';
 import { DialogButton } from '@/components/DialogButton';
@@ -54,38 +54,35 @@ export function DeleteConfirmDialog({ open, onClose }: DeleteConfirmDialogProps)
   }
 
   return (
-    <DialogShell open={open} onClose={close} title="对话管理">
-      {/* 原 dialog-shell(dc) 标题下边距 10px，外壳固定 14px，用 -mt-1 抵消 */}
-      <div className="-mt-1">
-        {active === undefined ? (
-          <p className="mb-[18px] text-[15px] text-subcard-text">
-            请先在左侧选中一段对话，再进行操作。
-          </p>
-        ) : action !== null ? (
-          <div>
-            <p className="mb-[14px] text-[15px] text-subcard-text">{CONFIRM_TEXTS[action]}</p>
-            <div className="flex gap-3">
-              <DialogButton variant="primary" onClick={() => void handleConfirm(action, active.id)}>
-                确认
-              </DialogButton>
-              <DialogButton onClick={() => setAction(null)}>取消</DialogButton>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2.5">
-            <DialogButton
-              variant="danger"
-              disabled={!canDelete}
-              title={canDelete ? undefined : '该角色只剩这一个会话，无法删除'}
-              onClick={() => setAction('delete')}
-            >
-              删除对话
+    <DialogShell open={open} onClose={close} title="对话管理" titleGap={10}>
+      {active === undefined ? (
+        <p className="mb-[18px] text-[15px] text-subcard-text">
+          请先在左侧选中一段对话，再进行操作。
+        </p>
+      ) : action !== null ? (
+        <div>
+          <p className="mb-[14px] text-[15px] text-subcard-text">{CONFIRM_TEXTS[action]}</p>
+          <div className="flex gap-3">
+            <DialogButton variant="primary" onClick={() => void handleConfirm(action, active.id)}>
+              确认
             </DialogButton>
-            <DialogButton onClick={() => setAction('clearMessages')}>清空消息</DialogButton>
-            <DialogButton onClick={() => setAction('clearContext')}>清空上下文</DialogButton>
+            <DialogButton onClick={() => setAction(null)}>取消</DialogButton>
           </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2.5">
+          <DialogButton
+            variant="danger"
+            disabled={!canDelete}
+            title={canDelete ? undefined : '该角色只剩这一个会话，无法删除'}
+            onClick={() => setAction('delete')}
+          >
+            删除对话
+          </DialogButton>
+          <DialogButton onClick={() => setAction('clearMessages')}>清空消息</DialogButton>
+          <DialogButton onClick={() => setAction('clearContext')}>清空上下文</DialogButton>
+        </div>
+      )}
     </DialogShell>
   );
 }

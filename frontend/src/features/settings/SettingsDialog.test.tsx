@@ -1,7 +1,7 @@
 /**
  * @file 设置对话框测试：AI 配置的保存 / 恢复默认 / 连接测试两种结果与只读信息；世界观恢复默认；
  * 角色提示词默认选中当前会话角色、徽标显示、保存空值 PUT 后徽标消失；数据管理统计与二次确认；
- * 关于页退出登录清除 token。
+ * 切换标签保留草稿；关于页退出登录清除 token。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -235,6 +235,20 @@ describe('SettingsDialog', () => {
       fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/delete-all-conversations')),
     ).toHaveLength(1);
     expect(useChatStore.getState().activeConversationId).toBeNull();
+  });
+
+  /** 六个标签页同时挂载：切走再切回，未保存的草稿仍在 */
+  it('切换标签后回来草稿保留', async () => {
+    mockFetch(defaultHandler);
+    await openTab('世界观设定');
+    const textarea = screen.getByLabelText('世界观设定');
+    await userEvent.type(textarea, '，补充一句');
+    await userEvent.click(screen.getByRole('tab', { name: '关于' }));
+    expect(textarea).not.toBeVisible();
+    expect(screen.getByRole('button', { name: '退出登录' })).toBeVisible();
+    await userEvent.click(screen.getByRole('tab', { name: '世界观设定' }));
+    expect(textarea).toBeVisible();
+    expect(textarea).toHaveValue('默认世界观，补充一句');
   });
 
   /** 关于：退出登录清除 token */

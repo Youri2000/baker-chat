@@ -40,7 +40,16 @@ describe('RegisterPage', () => {
     renderRegister();
     await submit('a-b', '123', '123');
     expect(screen.getByText('用户名为 3–20 位字母、数字或下划线')).toBeInTheDocument();
-    expect(screen.getByText('密码为 6–64 位')).toBeInTheDocument();
+    expect(screen.getByText('密码为 6–64 位字母、数字或英文符号，不含空格')).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  /** 密码只能是可打印 ASCII：含中文或空格都被拦下 */
+  it.each(['密码密码密码', 'pass word'])('密码 %s 不合规时提示且不发请求', async (password) => {
+    const fetchMock = mockFetch(() => jsonResponse({}));
+    renderRegister();
+    await submit('newuser', password, password);
+    expect(screen.getByText('密码为 6–64 位字母、数字或英文符号，不含空格')).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

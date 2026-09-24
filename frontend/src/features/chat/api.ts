@@ -1,5 +1,6 @@
 /**
- * @file 会话与消息接口（docs/api.md §2）。AI 对话流不在这里，由 chatStore 直接调 lib/sse。
+ * @file 会话与消息接口（docs/api.md §2–§3）。AI 对话流不在这里，由 chatStore 直接调 lib/sse；
+ * 停止生成的 POST 接口在这里。
  */
 import { http } from '@/lib/http';
 
@@ -57,4 +58,9 @@ export function clearMessages(id: number): Promise<void> {
 /** 只清 AI 上下文，消息保留 */
 export function clearContext(id: number): Promise<void> {
   return http<void>(`/conversations/${id}/context/clear`, { method: 'POST' });
+}
+
+/** 停止该会话正在进行的回复；返回时服务端已按中断规则落库。没有活动流时 stopped 为 false */
+export function stopChat(id: number): Promise<{ stopped: boolean }> {
+  return http<{ stopped: boolean }>(`/conversations/${id}/chat/stop`, { method: 'POST' });
 }

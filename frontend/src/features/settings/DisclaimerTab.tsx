@@ -1,5 +1,5 @@
 /**
- * @file 设置 › 免责声明：静态文本，内容与原项目 SettingsDialog.vue 逐字一致。
+ * @file 设置 › 免责声明：静态文本，第一节改为与后端按账号存储一致的说明，其余与原项目 SettingsDialog.vue 逐字一致。
  * 样式对应 sd__disclaimer-*：标题 18px 居中、小标题 15px 强调色、正文 13px/1.7 75% 白。
  */
 
@@ -21,12 +21,11 @@ export function DisclaimerTab() {
       </h3>
 
       <div className="flex flex-col gap-1.5">
-        <h4 className={HEADING_CLASS}>一、数据隐私与本地化</h4>
+        <h4 className={HEADING_CLASS}>一、数据存储与隐私</h4>
         <p className={TEXT_CLASS}>
-          本工具完全开源，不会收集、存储、上传或传输您的任何个人信息、API密钥、聊天记录或生成内容。所有数据仅存在于您当前使用的本地设备中。
-        </p>
-        <p className={TEXT_CLASS}>
-          由于技术上完全无法接触您的数据，无法应任何要求提供您本地对话的审查、删除或披露。
+          本工具完全开源；您的账号、聊天记录、AI
+          上下文、世界观与角色提示词按用户账号保存在本服务的后端数据库中，仅用于向 AI
+          服务商发起您的对话请求，不会用于其他用途。
         </p>
       </div>
 

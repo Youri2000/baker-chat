@@ -168,7 +168,7 @@ export function ChatInput() {
               type="button"
               aria-label="停止"
               className={clsx(CIRCLE_BUTTON, 'bg-stop after:bg-[rgba(0,0,0,0.15)]')}
-              onClick={stopGeneration}
+              onClick={() => void stopGeneration()}
             >
               <span className="absolute top-1/2 left-1/2 h-[14px] w-[14px] -translate-x-1/2 -translate-y-1/2 rounded-[2px] bg-white" />
             </button>

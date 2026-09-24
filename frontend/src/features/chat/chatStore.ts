@@ -1,6 +1,7 @@
 /**
  * @file 聊天数据层：会话列表、按会话缓存的消息、选中/折叠状态，以及 AI 流式回复。
- * 流式回复期间用 streaming.bubbles 逐行暂存 AI 气泡，结束后重新拉取该会话消息替换。
+ * 流式回复期间用 streaming.bubbles 逐行暂存 AI 气泡，流结束后重新拉取该会话消息替换；
+ * 停止生成先走后端 /chat/stop（它返回时服务端已落库并以 [DONE] 结束流），本地 AbortController 只兜底结束 fetch。
  * 所有动作失败时自行 toast，不向调用方 reject（网络与鉴权是唯一的错误边界）。
  */
 import { create } from 'zustand';
@@ -15,6 +16,7 @@ import {
   deleteConversation as apiDeleteConversation,
   getConversations,
   getMessages,
+  stopChat,
   type Conversation,
   type Message,
 } from '@/features/chat/api';
@@ -25,8 +27,9 @@ export interface StreamingState {
   conversationId: number;
   /** 已收完整的行，每行一个临时气泡 */
   bubbles: string[];
-  /** 请求仍在进行（显示加载气泡）；流结束到消息重拉完成之间为 false，bubbles 仍保留 */
+  /** 还会有新内容（显示加载气泡）；用户请求停止后、以及流结束到消息重拉完成之间为 false，bubbles 仍保留 */
   pending: boolean;
+  /** 本地 fetch 的取消句柄；stop 返回后用它兜底结束读取 */
   controller: AbortController;
 }
 
@@ -58,8 +61,8 @@ export interface ChatState {
   clearContext: (id: number) => Promise<void>;
   /** 向当前会话发送消息并流式接收回复 */
   sendMessage: (text: string) => Promise<void>;
-  /** 中止当前回复；已显示的行保留到消息重拉 */
-  stopGeneration: () => void;
+  /** 停止当前回复：先让后端落库并结束流，再结束本地 fetch；已显示的行保留到消息重拉 */
+  stopGeneration: () => Promise<void>;
   /** 丢弃本地消息缓存（数据管理"清空全部消息"后） */
   forgetMessages: () => void;
   /** 清空选中与消息缓存并重拉会话（数据管理"删除全部对话"后） */
@@ -191,7 +194,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       }
     },
 
-    // ✅ 发送 → 乐观追加我方消息 → 流式按行产生临时气泡 → 结束后重拉该会话消息
+    // ✅ 发送 → 乐观追加我方消息 → 流式按行产生临时气泡 → 流结束后重拉该会话消息
     sendMessage: async (text) => {
       const conversationId = get().activeConversationId;
       // 同一时刻只允许一条回复在进行
@@ -240,10 +243,10 @@ export const useChatStore = create<ChatState>()((set, get) => {
               pushBubbles([`[错误: ${message}]`]);
             },
             onDone: () => {
-              // [DONE] 后剩余非空文本作为最后一个气泡
+              // [DONE] 后剩余非空文本作为最后一个气泡；用户已请求停止时后端丢弃了这段半行，这里同样不显示
               const last = carry.trim();
               carry = '';
-              if (last !== '') pushBubbles([last]);
+              if (last !== '' && get().streaming?.pending === true) pushBubbles([last]);
             },
           },
         );
@@ -251,29 +254,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
         // 非 2xx（如 429 今日额度已用完）或网络错误；后端未保存消息，重拉会移除乐观消息
         toastError(err);
       }
-      // ⚠️ 中断：半行丢弃，已显示的行直接留作本地 aborted 消息。后端要到下一次写入时才察觉断开并持久化这些行，
-      // 立刻重拉会拿不到它们而让气泡消失；下次重拉（切换会话、下一条回复）再与服务端对齐
-      if (controller.signal.aborted) {
-        const now = Date.now();
-        const kept: Message[] = get().streaming!.bubbles.map((line, i) => ({
-          id: -now - i - 1,
-          side: 'other',
-          text: line,
-          status: 'aborted',
-          created_at: new Date(now).toISOString(),
-        }));
-        set((s) => {
-          const messages = [...(s.messagesByConversation[conversationId] ?? []), ...kept];
-          return {
-            messagesByConversation: { ...s.messagesByConversation, [conversationId]: messages },
-            conversations: withLastMessage(s.conversations, conversationId, messages),
-            streaming: null,
-          };
-        });
-        return;
-      }
-      // 流正常结束或出错：先关掉加载气泡，bubbles 保留到重拉完成
+      // 先关掉加载气泡，bubbles 保留到重拉完成
       set((s) => (s.streaming === null ? s : { streaming: { ...s.streaming, pending: false } }));
+      // ⚠️ 走到这里服务端一定已落库：[DONE] 在后端 finally 之后才发，stopGeneration 也在 stop 返回后才 abort；
       // 持久化结果与 streaming=null 在同一次 set 里落地，列表不会渲染"临时气泡 + 持久化消息"并存的中间状态
       try {
         const messages = await getMessages(conversationId);
@@ -288,8 +271,21 @@ export const useChatStore = create<ChatState>()((set, get) => {
       }
     },
 
-    stopGeneration: () => {
-      get().streaming?.controller.abort();
+    // 💡 显式 stop 接口取代"abort 后立刻重拉"：服务端先落库再结束流，消除竞态，详见 docs/interview.md#abort-race
+    stopGeneration: async () => {
+      const streaming = get().streaming;
+      // 没有回复在进行，或已经请求过停止
+      if (streaming === null || !streaming.pending) return;
+      // 立即收起加载气泡；之后到达的 [DONE] 不再把半行当作最后一个气泡
+      set({ streaming: { ...streaming, pending: false } });
+      try {
+        await stopChat(streaming.conversationId);
+      } catch (err) {
+        toastError(err);
+      }
+      // stop 返回时服务端已落库并发出 [DONE]，本地 fetch 通常已自行结束；abort 兜底 stopped=false 的情况，
+      // sendMessage 在流结束后重拉消息
+      streaming.controller.abort();
     },
 
     forgetMessages: () => set({ messagesByConversation: {} }),

@@ -1,8 +1,8 @@
 /**
  * @file 设置对话框：六个标签页（AI 配置 / 世界观设定 / 角色提示词 / 数据管理 / 免责声明 / 关于）。
- * 外壳用 DialogShell（560px）；选中的标签在开关之间保留（与原 SettingsDialog.vue 一致），
- * 各标签页自己持有草稿，关闭或切换标签即卸载，下次进入时从 store 重新同步。
- * 依赖 settings 的两个标签页在设置尚未加载时不渲染内容。
+ * 外壳用 DialogShell 的 settings 变体（560px、限高 80vh）；选中的标签在开关之间保留（与原 SettingsDialog.vue 一致）。
+ * 六个标签页同时挂载、非当前的用 hidden 隐藏，同一次打开内切换标签不会丢失各页自己持有的草稿；
+ * 关闭对话框才卸载，下次打开从 store 重新同步。依赖 settings 的两个标签页在设置尚未加载时不渲染内容。
  */
 import { useState } from 'react';
 import { DialogShell } from '@/components/DialogShell';
@@ -38,9 +38,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const settings = useSettingsStore((s) => s.settings);
   const [activeTab, setActiveTab] = useState<TabKey>('api');
 
-  /** 当前标签页内容 */
-  function renderTab() {
-    switch (activeTab) {
+  /** 某个标签页的内容 */
+  function renderTab(key: TabKey) {
+    switch (key) {
       case 'api':
         return settings === null ? null : <AiConfigTab settings={settings} />;
       case 'world':
@@ -57,25 +57,29 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   }
 
   return (
-    <DialogShell open={open} onClose={onClose} title="设置" width={560}>
-      {/* 原面板 max-height 80vh：减去外壳的上下内边距 28+20 与标题行 33+14，正文区在剩余高度内滚动 */}
-      <div className="flex max-h-[calc(80vh-95px)] flex-col">
-        <div role="tablist" className="mb-4 flex flex-wrap gap-1 border-b border-text-primary/10">
-          {TABS.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              role="tab"
-              aria-selected={tab.key === activeTab}
-              data-active={tab.key === activeTab ? '' : undefined}
-              className="cursor-pointer border-b-2 border-transparent px-4 py-2 text-[14px] text-text-primary/50 transition-all duration-(--anim-fast) hover:text-text-primary/80 data-active:border-accent data-active:text-text-primary"
-              onClick={() => setActiveTab(tab.key)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">{renderTab()}</div>
+    <DialogShell open={open} onClose={onClose} title="设置" width={560} variant="settings">
+      <div role="tablist" className="mb-4 flex flex-wrap gap-1 border-b border-text-primary/10">
+        {TABS.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            role="tab"
+            aria-selected={tab.key === activeTab}
+            data-active={tab.key === activeTab ? '' : undefined}
+            className="cursor-pointer border-b-2 border-transparent px-4 py-2 text-[14px] text-text-primary/50 transition-all duration-(--anim-fast) hover:text-text-primary/80 data-active:border-accent data-active:text-text-primary"
+            onClick={() => setActiveTab(tab.key)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      {/* 对应原 sd__body：在面板剩余高度内滚动 */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {TABS.map((tab) => (
+          <div key={tab.key} role="tabpanel" hidden={tab.key !== activeTab}>
+            {renderTab(tab.key)}
+          </div>
+        ))}
       </div>
     </DialogShell>
   );
