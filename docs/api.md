@@ -16,7 +16,7 @@
 | POST | `/api/auth/login`    | `{username, password}` | `200 {token, user}` | `401 用户名或密码错误`               |
 | GET  | `/api/auth/me`       | —                      | `200 user`          | `401`                                |
 
-- `username`：3–20 位，`^[A-Za-z0-9_]+$`；`password`：6–64 位
+- `username`：3–20 位，`^[A-Za-z0-9_]+$`；`password`：6–64 个可打印 ASCII 字符（`^[\x21-\x7E]{6,64}$`，不含空格；天然不超过 bcrypt 的 72 字节上限）
 - `user = {id: number, username: string}`
 - token：HS256 JWT，`sub` 为用户 id 字符串，7 天过期
 - 用户首次创建（注册或演示账号种子）时，后端为 29 个内置角色各建一个空会话，并创建默认 `settings`
@@ -49,6 +49,7 @@ interface Message {
 | POST   | `/api/conversations/{id}/messages/clear` | —                  | `204`（只清可见消息，上下文保留）                              | `404`                                                      |
 | POST   | `/api/conversations/{id}/context/clear`  | —                  | `204`（只清 AI 上下文，消息保留）                              | `404`                                                      |
 | POST   | `/api/conversations/{id}/chat`           | `{text}`           | `200 text/event-stream`（见第 3 节）                           | `404`；`422` 文本为空；`429 今日额度已用完`                |
+| POST   | `/api/conversations/{id}/chat/stop`      | —                  | `200 {stopped: boolean}`（见第 3 节"停止生成"）                | `404`                                                      |
 
 ## 3. AI 对话流 `POST /api/conversations/{id}/chat`
 
@@ -75,17 +76,25 @@ data: [DONE]
 ```
 
 - 上游错误映射：`401/403` → "上游认证失败（<code>）"；`429` → "上游限流，请稍后再试"；`5xx` → "上游服务异常（<code>）"；超时（连接 10s / 读取 60s）→ "上游响应超时"；其他 → "上游请求失败：<原因>"
-- 持久化规则（流结束、上游出错、客户端断开时都执行）：把已收到的全文按 `\n` 拆分，去掉每行首尾空白，丢弃空行，每行保存为一条 `other` 消息；正常结束 `status = 'completed'`，客户端断开 `status = 'aborted'`（未完成的半行丢弃）；出错时额外保存一条 `other` 消息，文本为 `[错误: <中文原因>]`，`status = 'failed'`
+- 持久化规则（流结束、上游出错、显式停止、客户端断开时都执行）：把已收到的全文按 `\n` 拆分，去掉每行首尾空白，丢弃空行，每行保存为一条 `other` 消息；正常结束 `status = 'completed'`，显式停止或客户端断开 `status = 'aborted'`（未完成的半行丢弃）；出错时额外保存一条 `other` 消息，文本为 `[错误: <中文原因>]`，`status = 'failed'`
 - 上下文：正常结束时把完整回复追加为 `ContextEntry(role='assistant')`；被中断时追加已完成的行；出错时不追加
+- `[DONE]` 一定在持久化完成之后才发出：客户端收到 `[DONE]` 时 `GET /messages` 已能读到本次回复
 - 请求头：`Cache-Control: no-cache`、`X-Accel-Buffering: no`
 - `AI_MOCK=1` 时不请求上游：以 80ms 间隔分块发送固定文本 `"收到，管理员。\n这是一条来自 mock 的回复。\n第三行用于验证分段。"`，用于 E2E、CI 和无 Key 的本地演示
+
+停止生成 `POST /api/conversations/{id}/chat/stop`：
+
+- 后端按会话 id 维护进程内的活动流登记表（条目只在流式生成器运行期间存在，任何结束路径都会移除）。有活动流时置位停止事件：生成器不再等待上游的下一帧、关闭上游连接，按上面的"显式停止"规则落库，**落库完成后才返回** `200 {"stopped": true}`，随后流发送 `[DONE]`
+- 没有活动流（已结束或尚未开始）时立即返回 `200 {"stopped": false}`
+- 会话归属同样校验：停别人的会话返回 `404`，所以用户停不了别人的流
+- 客户端直接断开（关闭标签页等）时仍走生成器的 finally 落库，作为兜底
 
 前端约定：
 
 - 用 `fetch` + `ReadableStream` + `TextDecoder('utf-8', {stream: true})` 解析，按 `\n` 切帧，未完成的尾部留在缓冲区
-- 收到 `delta` 后累积文本；每出现一个完整行（`\n`）就把该行（去掉首尾空白、跳过空行）显示为一个 AI 气泡；`[DONE]` 后剩余非空文本作为最后一个气泡
-- 每次请求独立创建 `AbortController`；停止生成即 `abort()`，已显示的行保留
-- 流结束（`[DONE]`、错误、中断）后重新拉取 `GET /messages`，用持久化结果替换本地临时气泡
+- 收到 `delta` 后累积文本；每出现一个完整行（`\n`）就把该行（去掉首尾空白、跳过空行）显示为一个 AI 气泡；`[DONE]` 后剩余非空文本作为最后一个气泡（已请求停止时不显示，与后端丢弃半行一致）
+- 每次请求独立创建 `AbortController`；停止生成先 `POST …/chat/stop`（返回即代表已持久化），再 `abort()` 兜底结束本地 fetch，已显示的行保留
+- 流结束（`[DONE]`、错误、中断）后重新拉取 `GET /messages`，用持久化结果替换本地临时气泡；`[DONE]` 与 stop 的响应都在后端落库之后才发出，所以这次重拉一定读到完整结果
 
 ## 4. 设置 `/api/settings`
 

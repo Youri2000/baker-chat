@@ -37,12 +37,27 @@ def test_register_returns_token_and_seeds_user_data(client: TestClient) -> None:
         {"username": "a" * 21, "password": "secret123"},  # 用户名过长
         {"username": "alice", "password": "12345"},  # 密码过短
         {"username": "alice", "password": "x" * 65},  # 密码过长
-        {"username": "alice", "password": "密" * 30},  # 超过 bcrypt 的 72 字节
+        {"username": "alice", "password": "pass word"},  # 含空格
+        {"username": "alice", "password": "密码密码密码"},  # 非 ASCII
     ],
 )
 def test_register_validation_422(client: TestClient, payload: dict[str, str]) -> None:
     """不合规的用户名或密码返回 422。"""
     assert client.post("/api/auth/register", json=payload).status_code == 422
+
+
+def test_password_accepts_printable_ascii_bounds(client: TestClient) -> None:
+    """密码规则的边界：6 位与 64 位、含全部可打印 ASCII 符号的口令都能注册并登录。"""
+    symbols = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+    longest = ((symbols + "Az09") * 2)[:64]
+    for username, password in (("bob", "abc123"), ("carol", longest)):
+        assert len(password) in (6, 64)
+        response = client.post(
+            "/api/auth/register", json={"username": username, "password": password}
+        )
+        assert response.status_code == 201, response.text
+        login = client.post("/api/auth/login", json={"username": username, "password": password})
+        assert login.status_code == 200
 
 
 def test_register_duplicate_409(client: TestClient) -> None:

@@ -1,4 +1,4 @@
-"""对话流测试：SSE 转发、上下文截断、每日额度、上游错误映射、客户端断开持久化、mock 流与 ping。"""
+"""对话流测试：SSE 转发、上下文截断、每日额度、上游错误映射、显式停止、断开持久化、mock 与 ping。"""
 
 import asyncio
 import json
@@ -12,12 +12,15 @@ from fastapi.testclient import TestClient
 from app.ai import MOCK_TEXT
 from app.characters import CHARACTER_PROMPTS, DEFAULT_WORLD_SETTING, FIXED_SYSTEM_PROMPT
 from app.config import settings
-from app.routers.chat import stream_reply
+from app.db import SessionLocal
+from app.models import Conversation
+from app.routers.chat import ActiveStream, active_streams, stop_chat, stream_reply
 from tests.conftest import (
     context_rows,
     first_conversation,
     message_rows,
     mock_upstream,
+    register,
     seed,
     sse_events,
 )
@@ -249,6 +252,89 @@ def test_client_disconnect_persists_completed_lines_as_aborted(
     assert context_rows(conversation_id) == [("assistant", "第一行\n第二行")]
 
 
+def test_stop_returns_after_persist_without_waiting_for_upstream(
+    client: TestClient, auth: dict[str, str], upstream: respx.MockRouter
+) -> None:
+    """/chat/stop：上游发完 2 帧后永远不再出数据，stop 仍立即返回。
+
+    返回时已按中断规则落库（完整行 aborted、半行丢弃、上下文只含完整行）；随后流以 [DONE]
+    结束，登记表清空。
+    """
+    never = asyncio.Event()
+
+    async def body() -> AsyncIterator[bytes]:
+        for delta in ("第一行\n第二", "行\n第三"):
+            chunk = {"choices": [{"delta": {"content": delta}}]}
+            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n".encode()
+        await never.wait()  # 模拟上游长时间不出下一个 token
+
+    upstream.post("/chat/completions").mock(return_value=httpx.Response(200, content=body()))
+    conversation_id = first_conversation(client, auth)
+    with SessionLocal() as db:
+        conversation = db.get(Conversation, conversation_id)
+
+    async def drive() -> tuple[list[str], list[tuple[str, str, str]], bool]:
+        generator = stream_reply(conversation_id, CHAT_MESSAGES, 0.8, 100)
+        frames = [await anext(generator), await anext(generator)]
+        pull = asyncio.ensure_future(anext(generator))
+        await asyncio.sleep(0.01)  # 让 pull 真正挂在对上游第 3 帧的等待上
+        result = await asyncio.wait_for(stop_chat(conversation), 2)
+        rows_when_returned = message_rows(conversation_id)
+        frames.append(await pull)
+        return frames, rows_when_returned, result.stopped
+
+    frames, rows_when_returned, stopped = asyncio.run(drive())
+    assert stopped is True
+    assert [json.loads(frame[5:]) for frame in frames[:2]] == [
+        {"delta": "第一行\n第二"},
+        {"delta": "行\n第三"},
+    ]
+    assert frames[2] == "data: [DONE]\n\n"
+    assert rows_when_returned == [
+        ("other", "第一行", "aborted"),
+        ("other", "第二行", "aborted"),
+    ]
+    assert context_rows(conversation_id) == [("assistant", "第一行\n第二行")]
+    assert conversation_id not in active_streams
+
+
+def test_stop_without_active_stream_returns_false(client: TestClient, auth: dict[str, str]) -> None:
+    """没有活动流时 /chat/stop 直接返回 200 {"stopped": false}。"""
+    conversation_id = first_conversation(client, auth)
+    response = client.post(f"/api/conversations/{conversation_id}/chat/stop", headers=auth)
+    assert response.status_code == 200
+    assert response.json() == {"stopped": False}
+
+
+def test_stop_endpoint_signals_registered_stream(client: TestClient, auth: dict[str, str]) -> None:
+    """有登记的活动流时：置位 stop、等到 finished 后返回 {"stopped": true}。"""
+    conversation_id = first_conversation(client, auth)
+    stream = ActiveStream()
+    stream.finished.set()  # 生成器落库后才置位；这里预先置位，只验证接口本身
+    active_streams[conversation_id] = stream
+    try:
+        response = client.post(f"/api/conversations/{conversation_id}/chat/stop", headers=auth)
+    finally:
+        del active_streams[conversation_id]
+    assert response.json() == {"stopped": True}
+    assert stream.stop.is_set()
+
+
+def test_stop_other_users_conversation_404(client: TestClient, auth: dict[str, str]) -> None:
+    """用 B 的 token 停 A 的会话返回 404 且 A 的流不受影响；未登录 401。"""
+    conversation_id = first_conversation(client, auth)
+    stream = ActiveStream()
+    active_streams[conversation_id] = stream
+    try:
+        bob = register(client, "bob")
+        response = client.post(f"/api/conversations/{conversation_id}/chat/stop", headers=bob)
+        assert response.status_code == 404
+        assert not stream.stop.is_set()
+        assert client.post(f"/api/conversations/{conversation_id}/chat/stop").status_code == 401
+    finally:
+        del active_streams[conversation_id]
+
+
 def test_task_cancellation_persists_as_aborted(
     client: TestClient, auth: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -292,6 +378,7 @@ def test_mock_stream_when_ai_mock(
         ("other", "这是一条来自 mock 的回复。", "completed"),
         ("other", "第三行用于验证分段。", "completed"),
     ]
+    assert active_streams == {}  # 正常结束同样注销活动流
 
 
 def test_blank_text_422(client: TestClient, auth: dict[str, str]) -> None:

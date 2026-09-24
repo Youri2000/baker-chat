@@ -1,7 +1,9 @@
-"""AI 相关路由：对话流（SSE 转发 + 三种结束方式的持久化）、每日额度、连接测试。"""
+"""AI 相关路由：对话流（SSE 转发 + 四种结束方式的持久化）、显式停止、每日额度、连接测试。"""
 
+import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
@@ -15,12 +17,24 @@ from app.config import settings
 from app.db import SessionLocal
 from app.deps import ConversationDep, DbDep, UserDep
 from app.models import ContextEntry, Conversation, Message, PromptOverride, UserSettings
-from app.schemas import ChatRequest, PingOut
+from app.schemas import ChatRequest, PingOut, StopOut
 
 router = APIRouter(tags=["chat"])
 
 CONTEXT_WINDOW = 40  # 发给上游的最近上下文条数（不含两条 system）
 CHINA_TZ = timezone(timedelta(hours=8))  # 每日额度按 UTC+8 自然日统计
+
+
+@dataclass
+class ActiveStream:
+    """一条正在转发的回复流：stop 由 /chat/stop 置位，finished 在落库完成后置位。"""
+
+    stop: asyncio.Event = field(default_factory=asyncio.Event)
+    finished: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+# ⚠️ 进程内登记表：会话 id → 活动流。只在生成器运行期间存在，任何结束路径都在 finally 里移除
+active_streams: dict[int, ActiveStream] = {}
 
 
 def count_today_messages(db: Session, user_id: int) -> int:
@@ -49,11 +63,11 @@ def persist_reply(conversation_id: int, full_text: str, status: str, error: str 
     Args:
         conversation_id: 回复所属会话。
         full_text: 到结束为止收到的全部增量文本。
-        status: completed（正常结束）/ aborted（客户端断开）/ failed（上游出错）。
+        status: completed（正常结束）/ aborted（显式停止或客户端断开）/ failed（上游出错）。
         error: 出错时的中文原因，只在 status 为 failed 时非空。
     """
     parts = full_text.split("\n")
-    # ⚠️ 断开时最后一段是未收完的半行（也可能是空串），按契约丢弃
+    # ⚠️ 中断时最后一段是未收完的半行（也可能是空串），按契约丢弃
     if status == "aborted":
         parts = parts[:-1]
     lines = [line.strip() for line in parts if line.strip()]
@@ -80,23 +94,59 @@ def persist_reply(conversation_id: int, full_text: str, status: str, error: str 
         db.commit()
 
 
+async def next_frame(
+    upstream: AsyncGenerator[dict[str, object]], stop: asyncio.Event
+) -> dict[str, object] | None:
+    """等上游下一帧与 stop 事件中先到的一个；stop 先到或上游结束都返回 None。
+
+    只在"每帧转发前检查事件"会让 stop 接口等到上游下一帧才返回（真实 DeepSeek 的首个 token
+    可能要几秒），所以把两者一起 wait，stop 先到时取消对上游的等待，上游连接随之关闭。
+    """
+    frame_task = asyncio.ensure_future(anext(upstream))
+    stop_task = asyncio.ensure_future(stop.wait())
+    try:
+        await asyncio.wait({frame_task, stop_task}, return_when=asyncio.FIRST_COMPLETED)
+    except asyncio.CancelledError:
+        # 客户端断开：Starlette 取消本协程，把对上游的等待一并取消
+        frame_task.cancel()
+        raise
+    finally:
+        stop_task.cancel()
+    if stop.is_set():
+        frame_task.cancel()
+        await asyncio.gather(frame_task, return_exceptions=True)
+        return None
+    try:
+        return frame_task.result()
+    except StopAsyncIteration:
+        return None
+
+
 async def stream_reply(
     conversation_id: int, messages: list[dict[str, str]], temperature: float, max_tokens: int
 ) -> AsyncIterator[str]:
     """✅ 转发上游 SSE 帧，并保证无论怎样结束都在 finally 里持久化。
 
-    三种结束方式：上游发完（completed）、上游 / 网络出错（failed，先发一帧 error 再发
-    [DONE]）、客户端断开（aborted，生成器在 await 处收到 CancelledError 或 GeneratorExit）。
+    四种结束方式：上游发完（completed）、上游 / 网络出错（failed，先发一帧 error 再发
+    [DONE]）、/chat/stop 显式停止（aborted，落库后 stop 接口才返回，随后发 [DONE]）、
+    客户端断开（aborted，生成器在 await 处收到 CancelledError 或 GeneratorExit，作为兜底）。
     """
+    stream = ActiveStream()
+    active_streams[conversation_id] = stream
+    upstream = ai.stream_chat(messages, temperature, max_tokens)
     full_text = ""
     status = "aborted"  # ⚠️ 默认按中断处理，只有走到流末尾才改成 completed
     error: str | None = None
     try:
-        async for frame in ai.stream_chat(messages, temperature, max_tokens):
+        while (frame := await next_frame(upstream, stream.stop)) is not None:
             if "delta" in frame:
                 full_text += frame["delta"]
             yield sse_frame(frame)
-        status = "completed"
+        if stream.stop.is_set():
+            # 与 stop 同时到达的那一帧已丢弃，上游可能仍挂在 yield 上，显式关闭
+            await upstream.aclose()
+        else:
+            status = "completed"
     except ai.UpstreamError as exc:
         status, error = "failed", str(exc)
         yield sse_frame({"error": error})
@@ -104,6 +154,9 @@ async def stream_reply(
         # 💡 同步写库放在 finally：取消只发生在 await 处，同步代码不会被打断
         # 详见 docs/interview.md#sse-persist
         persist_reply(conversation_id, full_text, status, error)
+        if active_streams.get(conversation_id) is stream:
+            del active_streams[conversation_id]
+        stream.finished.set()  # 等在 /chat/stop 上的请求此刻才返回
     yield "data: [DONE]\n\n"
 
 
@@ -150,6 +203,20 @@ def chat(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/conversations/{conversation_id}/chat/stop")
+async def stop_chat(conversation: ConversationDep) -> StopOut:
+    """停止该会话正在进行的回复：等生成器按中断规则落库后才返回；没有活动流时 stopped 为 false。
+
+    会话归属由 ConversationDep 校验（跨用户 404），所以用户停不了别人的流。
+    """
+    stream = active_streams.get(conversation.id)
+    if stream is None:
+        return StopOut(stopped=False)
+    stream.stop.set()
+    await stream.finished.wait()
+    return StopOut(stopped=True)
 
 
 @router.get("/ai/ping", response_model_exclude_none=True)

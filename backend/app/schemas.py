@@ -9,18 +9,13 @@ from app.characters import CHARACTER_NAMES
 
 
 class AuthRequest(BaseModel):
-    """注册与登录共用的请求体。"""
+    """注册与登录共用的请求体。
+
+    密码限定为 6–64 个可打印 ASCII 字符（不含空格），天然不会超过 bcrypt 的 72 字节上限。
+    """
 
     username: str = Field(min_length=3, max_length=20, pattern=r"^[A-Za-z0-9_]+$")
-    password: str = Field(min_length=6, max_length=64)
-
-    @field_validator("password")
-    @classmethod
-    def check_password_bytes(cls, value: str) -> str:
-        """超过 72 字节的口令在入口拒绝：bcrypt 只接受 72 字节以内的输入。"""
-        if len(value.encode()) > 72:
-            raise ValueError("密码过长（最多 72 字节）")
-        return value
+    password: str = Field(pattern=r"^[\x21-\x7E]{6,64}$")
 
 
 class UserOut(BaseModel):
@@ -141,6 +136,12 @@ class PingOut(BaseModel):
     ok: bool
     model: str
     error: str | None = None
+
+
+class StopOut(BaseModel):
+    """停止生成的结果：stopped 为 true 表示确实停掉了一条活动流且已落库。"""
+
+    stopped: bool
 
 
 class StatsOut(BaseModel):
