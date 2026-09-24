@@ -1,5 +1,5 @@
 /**
- * @file 注册页 /register：用户名（3–20 位字母/数字/下划线）、密码（6–64 个可打印 ASCII 字符）、确认密码。
+ * @file 注册页 /register：用户名（3–20 位字母/数字/下划线）、密码（6–64 个字符，UTF-8 不超过 72 字节）、确认密码。
  * 本地校验失败在对应输入框下方提示；用户名被占用来自后端 409。注册成功即登录并跳 /。
  */
 import { useState, type FormEvent } from 'react';
@@ -10,8 +10,13 @@ import { FormField } from '@/features/auth/FormField';
 import { useAuthStore } from '@/features/auth/authStore';
 
 const USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;
-/** 6–64 个可打印 ASCII 字符、不含空格，与后端 AuthRequest 同一条规则 */
-const PASSWORD_RE = /^[\x21-\x7E]{6,64}$/;
+const PASSWORD_ERROR = '密码为 6–64 位；含中文时最多 24 个字';
+
+/** 6–64 个字符（按码点计）、不限字符集；bcrypt 只接受 72 字节，UTF-8 超长在这里拦下，与后端 AuthRequest 同一条规则 */
+function isValidPassword(password: string): boolean {
+  const length = [...password].length;
+  return length >= 6 && length <= 64 && new TextEncoder().encode(password).length <= 72;
+}
 
 /** 三个字段的错误 */
 interface RegisterErrors {
@@ -24,9 +29,7 @@ interface RegisterErrors {
 function validate(username: string, password: string, confirm: string): RegisterErrors {
   const errors: RegisterErrors = {};
   if (!USERNAME_RE.test(username)) errors.username = '用户名为 3–20 位字母、数字或下划线';
-  if (!PASSWORD_RE.test(password)) {
-    errors.password = '密码为 6–64 位字母、数字或英文符号，不含空格';
-  }
+  if (!isValidPassword(password)) errors.password = PASSWORD_ERROR;
   if (confirm !== password) errors.confirm = '两次输入的密码不一致';
   return errors;
 }
@@ -87,7 +90,7 @@ export function RegisterPage() {
           label="密码"
           type="password"
           autoComplete="new-password"
-          placeholder="6–64 位字母、数字或英文符号"
+          placeholder="6–64 位，含中文时最多 24 个字"
           value={password}
           error={errors.password}
           onChange={(e) => setPassword(e.target.value)}

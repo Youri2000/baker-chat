@@ -40,18 +40,36 @@ describe('RegisterPage', () => {
     renderRegister();
     await submit('a-b', '123', '123');
     expect(screen.getByText('用户名为 3–20 位字母、数字或下划线')).toBeInTheDocument();
-    expect(screen.getByText('密码为 6–64 位字母、数字或英文符号，不含空格')).toBeInTheDocument();
+    expect(screen.getByText('密码为 6–64 位；含中文时最多 24 个字')).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  /** 密码只能是可打印 ASCII：含中文或空格都被拦下 */
-  it.each(['密码密码密码', 'pass word'])('密码 %s 不合规时提示且不发请求', async (password) => {
+  /** 超过 64 个字符，或字符数合规但 UTF-8 超过 bcrypt 的 72 字节（25 个汉字）都被拦下 */
+  it.each([
+    { why: '65 个字符', password: 'x'.repeat(65) },
+    { why: '25 个汉字（75 字节）', password: '密'.repeat(25) },
+  ])('密码为 $why 时提示且不发请求', async ({ password }) => {
     const fetchMock = mockFetch(() => jsonResponse({}));
     renderRegister();
     await submit('newuser', password, password);
-    expect(screen.getByText('密码为 6–64 位字母、数字或英文符号，不含空格')).toBeInTheDocument();
+    expect(screen.getByText('密码为 6–64 位；含中文时最多 24 个字')).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  /** 不限字符集：含空格、中文的密码通过本地校验；24 个汉字恰好 72 字节也放行 */
+  it.each(['pass word 密码', '密'.repeat(24)])(
+    '密码 %s 通过本地校验并发起注册',
+    async (password) => {
+      const fetchMock = mockFetch((req) => {
+        expect(req.body).toEqual({ username: 'newuser', password });
+        return jsonResponse({ token: 'jwt', user: { id: 2, username: 'newuser' } }, 201);
+      });
+      renderRegister();
+      await submit('newuser', password, password);
+      expect(await screen.findByText('home')).toBeInTheDocument();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
 
   /** 两次密码不一致 */
   it('两次密码不一致时在确认密码下方提示', async () => {

@@ -37,8 +37,7 @@ def test_register_returns_token_and_seeds_user_data(client: TestClient) -> None:
         {"username": "a" * 21, "password": "secret123"},  # 用户名过长
         {"username": "alice", "password": "12345"},  # 密码过短
         {"username": "alice", "password": "x" * 65},  # 密码过长
-        {"username": "alice", "password": "pass word"},  # 含空格
-        {"username": "alice", "password": "密码密码密码"},  # 非 ASCII
+        {"username": "alice", "password": "密" * 25},  # 25 个汉字 = 75 字节，超过 bcrypt 72 字节
     ],
 )
 def test_register_validation_422(client: TestClient, payload: dict[str, str]) -> None:
@@ -46,12 +45,24 @@ def test_register_validation_422(client: TestClient, payload: dict[str, str]) ->
     assert client.post("/api/auth/register", json=payload).status_code == 422
 
 
-def test_password_accepts_printable_ascii_bounds(client: TestClient) -> None:
-    """密码规则的边界：6 位与 64 位、含全部可打印 ASCII 符号的口令都能注册并登录。"""
+def test_password_over_72_bytes_422_with_reason(client: TestClient) -> None:
+    """长度在 6–64 内但 UTF-8 超过 72 字节的密码返回 422，msg 里带中文提示。"""
+    response = client.post("/api/auth/register", json={"username": "alice", "password": "密" * 25})
+    assert response.status_code == 422
+    assert "密码为 6–64 位；含中文时最多 24 个字" in response.json()["detail"][0]["msg"]
+
+
+def test_password_accepts_any_characters_within_bounds(client: TestClient) -> None:
+    """密码规则的边界：6 位、64 位、含空格与符号、24 个汉字（恰好 72 字节）都能注册并登录。"""
     symbols = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
-    longest = ((symbols + "Az09") * 2)[:64]
-    for username, password in (("bob", "abc123"), ("carol", longest)):
-        assert len(password) in (6, 64)
+    cases = (
+        ("bob", "abc123"),
+        ("carol", ((symbols + "Az09") * 2)[:64]),
+        ("dave", "pass word 密码"),
+        ("erin", "密" * 24),
+    )
+    for username, password in cases:
+        assert 6 <= len(password) <= 64 and len(password.encode()) <= 72
         response = client.post(
             "/api/auth/register", json={"username": username, "password": password}
         )

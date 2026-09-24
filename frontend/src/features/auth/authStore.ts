@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import { toast } from '@/components/toastStore';
 import { onUnauthorized, tokenStorage } from '@/lib/http';
 import { login as apiLogin, me, register as apiRegister, type User } from '@/features/auth/api';
+import { useChatStore } from '@/features/chat/chatStore';
 
 /** 登录态 store */
 export interface AuthState {
@@ -37,6 +38,9 @@ export const useAuthStore = create<AuthState>()((set) => ({
     set({ token, user });
   },
   logout: () => {
+    // 退出时中止进行中的回复流并清掉临时气泡；流结束后的重拉不再带 token，只会得到普通 401
+    useChatStore.getState().streaming?.controller.abort();
+    useChatStore.setState({ streaming: null });
     tokenStorage.clear();
     set({ token: null, user: null });
   },

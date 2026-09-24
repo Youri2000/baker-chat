@@ -16,7 +16,7 @@
 | POST | `/api/auth/login`    | `{username, password}` | `200 {token, user}` | `401 用户名或密码错误`               |
 | GET  | `/api/auth/me`       | —                      | `200 user`          | `401`                                |
 
-- `username`：3–20 位，`^[A-Za-z0-9_]+$`；`password`：6–64 个可打印 ASCII 字符（`^[\x21-\x7E]{6,64}$`，不含空格；天然不超过 bcrypt 的 72 字节上限）
+- `username`：3–20 位，`^[A-Za-z0-9_]+$`；`password`：6–64 个字符（按 Unicode 码点计），不限字符集；UTF-8 编码超过 bcrypt 的 72 字节上限时 `422`（提示"密码为 6–64 位；含中文时最多 24 个字"），前端表单用同一条规则本地校验
 - `user = {id: number, username: string}`
 - token：HS256 JWT，`sub` 为用户 id 字符串，7 天过期
 - 用户首次创建（注册或演示账号种子）时，后端为 29 个内置角色各建一个空会话，并创建默认 `settings`

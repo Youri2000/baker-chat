@@ -11,11 +11,19 @@ from app.characters import CHARACTER_NAMES
 class AuthRequest(BaseModel):
     """注册与登录共用的请求体。
 
-    密码限定为 6–64 个可打印 ASCII 字符（不含空格），天然不会超过 bcrypt 的 72 字节上限。
+    密码 6–64 个字符、不限字符集；bcrypt 只接受 72 字节，UTF-8 编码超出时在这里拒绝而不是静默截断。
     """
 
     username: str = Field(min_length=3, max_length=20, pattern=r"^[A-Za-z0-9_]+$")
-    password: str = Field(pattern=r"^[\x21-\x7E]{6,64}$")
+    password: str = Field(min_length=6, max_length=64)
+
+    @field_validator("password")
+    @classmethod
+    def check_password_bytes(cls, value: str) -> str:
+        """UTF-8 编码超过 bcrypt 的 72 字节上限（含中文时 24 个字）以 422 拒绝。"""
+        if len(value.encode()) > 72:
+            raise ValueError("密码为 6–64 位；含中文时最多 24 个字")
+        return value
 
 
 class UserOut(BaseModel):
