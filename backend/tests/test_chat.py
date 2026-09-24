@@ -63,6 +63,8 @@ def test_forwards_delta_and_usage_frames(
         {"include_usage": True},
     )
     assert (sent["temperature"], sent["max_tokens"]) == (0.8, 2048)
+    # 角色闲聊关闭思考模式：否则思考 token 计入 max_tokens，答案还要等思考结束后整段到达
+    assert sent["thinking"] == {"type": "disabled"}
 
     assert message_rows(conversation_id) == [
         ("mine", "你好", "completed"),

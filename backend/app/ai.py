@@ -33,7 +33,8 @@ def _transport_message(exc: Exception) -> str:
     """把 httpx 传输层异常（超时、连接失败、坏响应）映射为中文原因。"""
     if isinstance(exc, httpx.TimeoutException):
         return "上游响应超时"
-    return f"上游请求失败：{exc}"
+    # 部分异常（如 ReadError）的 str 为空，只留异常类名让用户和日志能看出原因
+    return f"上游请求失败：{exc or type(exc).__name__}"
 
 
 def _client() -> httpx.AsyncClient:
@@ -70,6 +71,9 @@ async def stream_chat(
         "max_tokens": max_tokens,
         "stream": True,
         "stream_options": {"include_usage": True},
+        # 💡 V4 系列默认开启思考模式：角色闲聊用不上，思考 token 却计入 max_tokens 与费用，
+        # 且答案要等思考结束后整段到达，流式分段失效。实测数据见 docs/interview.md#thinking-mode
+        "thinking": {"type": "disabled"},
     }
     try:
         async with (
@@ -92,12 +96,14 @@ async def stream_chat(
                 # 开启 stream_options.include_usage 后，上游最后一帧 choices 为空、只带 usage
                 usage = chunk.get("usage")
                 if usage:
-                    yield {
-                        "usage": {
-                            "prompt_tokens": usage["prompt_tokens"],
-                            "completion_tokens": usage["completion_tokens"],
-                        }
+                    forwarded = {
+                        "prompt_tokens": usage["prompt_tokens"],
+                        "completion_tokens": usage["completion_tokens"],
                     }
+                    # DeepSeek 特有字段：前缀缓存命中的 prompt token 数，按缓存价计费
+                    if "prompt_cache_hit_tokens" in usage:
+                        forwarded["prompt_cache_hit_tokens"] = usage["prompt_cache_hit_tokens"]
+                    yield {"usage": forwarded}
     except (httpx.HTTPError, ValueError) as exc:
         raise UpstreamError(_transport_message(exc)) from exc
 
@@ -110,6 +116,7 @@ async def ping() -> str | None:
         "model": settings.deepseek_model,
         "messages": [{"role": "user", "content": "ping"}],
         "max_tokens": 1,
+        "thinking": {"type": "disabled"},
     }
     try:
         async with _client() as client:

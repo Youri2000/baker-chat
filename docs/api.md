@@ -62,7 +62,7 @@ interface Message {
    - `messages[0]`：`system` = 固定系统提示词 + `"\n\n## 世界观设定\n\n"` + 用户世界观（空则用默认世界观）
    - `messages[1]`：`system` = 角色提示词（用户覆盖优先，否则内置）
    - 之后：该会话最近 40 条 `ContextEntry`（含刚追加的这条），`user` / `assistant` 原样映射
-   - 请求体：`{model, messages, temperature, max_tokens, stream: true, stream_options: {include_usage: true}}`
+   - 请求体：`{model, messages, temperature, max_tokens, stream: true, stream_options: {include_usage: true}, thinking: {type: "disabled"}}`（V4 系列默认开启思考模式，角色闲聊关闭：思考 token 会计入 `max_tokens` 与费用，且答案要等思考结束后整段到达）
 5. 以 SSE 转发。
 
 SSE 帧格式（每帧 `data: <json>\n\n`）：
@@ -70,7 +70,7 @@ SSE 帧格式（每帧 `data: <json>\n\n`）：
 ```text
 data: {"delta": "第一行\n第二"}        ← 增量文本，原样转发上游 choices[0].delta.content
 data: {"delta": "行\n第三行"}
-data: {"usage": {"prompt_tokens": 812, "completion_tokens": 45}}   ← 上游最后一帧的 usage，可选
+data: {"usage": {"prompt_tokens": 812, "completion_tokens": 45, "prompt_cache_hit_tokens": 768}}   ← 上游最后一帧的 usage，可选；`prompt_cache_hit_tokens` 只在上游返回时带
 data: {"error": "上游认证失败（401）"}   ← 出错时发送一帧中文原因，然后立即发 [DONE]
 data: [DONE]
 ```

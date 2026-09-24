@@ -37,8 +37,13 @@ def request_json(
     return json.loads(raw) if raw else None
 
 
-def chat_usage(api: str, token: str, conversation_id: int, text: str) -> int | None:
-    """✅ 发送一条消息并读完 SSE，返回 usage 帧里的 prompt_tokens；没有 usage 帧时返回 None。"""
+def chat_usage(
+    api: str, token: str, conversation_id: int, text: str
+) -> tuple[int | None, int | None]:
+    """✅ 发送一条消息并读完 SSE，返回 usage 帧里的 (prompt_tokens, prompt_cache_hit_tokens)。
+
+    没有 usage 帧时两者都是 None；上游没带缓存命中字段时第二项为 None。
+    """
     req = urllib.request.Request(
         f"{api}/api/conversations/{conversation_id}/chat",
         data=json.dumps({"text": text}).encode("utf-8"),
@@ -46,6 +51,7 @@ def chat_usage(api: str, token: str, conversation_id: int, text: str) -> int | N
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
     )
     prompt_tokens = None
+    cache_hit = None
     try:
         with urllib.request.urlopen(req) as resp:
             # urllib 按行读取分块响应，每来一行就处理，不等整个流结束
@@ -59,11 +65,12 @@ def chat_usage(api: str, token: str, conversation_id: int, text: str) -> int | N
                 frame = json.loads(payload)
                 if "usage" in frame:
                     prompt_tokens = frame["usage"]["prompt_tokens"]
+                    cache_hit = frame["usage"].get("prompt_cache_hit_tokens")
                 if "error" in frame:
                     print(f"  上游错误：{frame['error']}", file=sys.stderr)
     except urllib.error.HTTPError as exc:
         sys.exit(f"chat -> {exc.code}: {exc.read().decode('utf-8')}")
-    return prompt_tokens
+    return prompt_tokens, cache_hit
 
 
 def main() -> None:
@@ -86,20 +93,27 @@ def main() -> None:
     print(f"会话 {conversation_id}（{args.character}），连续发送 {args.count} 条")
 
     curve: list[int | None] = []
+    hits: list[int | None] = []
     try:
         for i in range(1, args.count + 1):
-            tokens = chat_usage(args.api, token, conversation_id, f"第 {i} 条：请用一句话回复我。")
+            tokens, hit = chat_usage(
+                args.api, token, conversation_id, f"第 {i} 条：请用一句话回复我。"
+            )
             curve.append(tokens)
-            print(f"  #{i:<3} prompt_tokens = {'-' if tokens is None else tokens}", flush=True)
+            hits.append(hit)
+            shown_hit = "" if hit is None else f"（缓存命中 {hit}）"
+            shown = "-" if tokens is None else tokens
+            print(f"  #{i:<3} prompt_tokens = {shown}{shown_hit}", flush=True)
     finally:
         request_json(args.api, "DELETE", f"/api/conversations/{conversation_id}", token, None)
 
-    print("\n| 第 n 条 | prompt_tokens |\n| --- | --- |")
+    print("\n| 第 n 条 | prompt_tokens | 缓存命中 |\n| --- | --- | --- |")
     for n in REPORT_POINTS:
         if n <= len(curve):
-            value = curve[n - 1]
-            print(f"| {n} | {'-' if value is None else value} |")
+            value, hit = curve[n - 1], hits[n - 1]
+            print(f"| {n} | {'-' if value is None else value} | {'-' if hit is None else hit} |")
     print("\n完整曲线（CSV）：" + ",".join("-" if v is None else str(v) for v in curve))
+    print("缓存命中曲线（CSV）：" + ",".join("-" if v is None else str(v) for v in hits))
 
 
 if __name__ == "__main__":
