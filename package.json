@@ -2,6 +2,7 @@
   "name": "baker-chat",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "终末地 BAKER 会话消息：React + FastAPI 重写版",
   "packageManager": "pnpm@9.12.0",
   "engines": {
