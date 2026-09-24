@@ -1,0 +1,51 @@
+# 一键本地启动：docker compose up --build → 前端 http://localhost:5173、后端 http://localhost:8000。
+# 端口可用 FRONTEND_PORT / BACKEND_PORT 覆盖（例如 FRONTEND_PORT=5190 BACKEND_PORT=8090 docker compose up）。
+# 后端默认 AI_MOCK=1，不需要 DeepSeek Key；要接真实模型时在 backend/.env 填 DEEPSEEK_API_KEY，
+# 并以 AI_MOCK=0 docker compose up 启动（下面 environment 里的四个变量优先于 backend/.env）。
+services:
+  backend:
+    build: ./backend
+    env_file:
+      - path: backend/.env
+        required: false
+    environment:
+      AI_MOCK: ${AI_MOCK:-1}
+      # 仅供本地开发的 32 字节以上密钥，线上一定要换
+      JWT_SECRET: ${JWT_SECRET:-dev-only-jwt-secret-0123456789abcdef0123456789}
+      # 浏览器里的前端来源就是映射后的本机端口
+      CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-5173}
+      DATABASE_URL: sqlite:////app/data/baker.db
+    volumes:
+      - baker-data:/app/data
+    ports:
+      - '${BACKEND_PORT:-8000}:8000'
+    healthcheck:
+      # python:3.13-slim 没有 curl，用标准库探测
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # 构建期写进产物：浏览器直接访问映射到本机的后端端口
+        VITE_API_BASE_URL: http://localhost:${BACKEND_PORT:-8000}
+    ports:
+      - '${FRONTEND_PORT:-5173}:80'
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  # SQLite 数据文件，docker compose down 保留、down -v 删除
+  baker-data:

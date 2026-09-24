@@ -1,0 +1,33 @@
+# Render Blueprint（规范：https://render.com/docs/blueprint-spec）：一个 Docker 类型的 Web Service 运行后端，
+# rootDir 为 backend、用 backend/Dockerfile 构建；Render 通过 PORT 注入监听端口，Dockerfile 的 CMD 读取它。
+# sync: false 的三项在控制台手填（Blueprint 首次 Apply 时会逐项提示），不进仓库；其余给默认值。
+# CORS_ORIGINS 在前端部署到 Vercel 之后改成实际的 Vercel 域名（docs/deploy.md 第 (d) 步）。
+services:
+  - type: web
+    name: baker-chat-api
+    runtime: docker
+    rootDir: backend
+    region: singapore
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DEEPSEEK_BASE_URL
+        value: https://api.deepseek.com
+      - key: DEEPSEEK_MODEL
+        value: deepseek-flash
+      - key: CORS_ORIGINS
+        value: https://baker-chat.vercel.app
+      - key: DAILY_MESSAGE_LIMIT
+        value: '100'
+      - key: DEMO_USERNAME
+        value: demo
+      - key: DEMO_PASSWORD
+        value: demo123
+      - key: AI_MOCK
+        value: '0'

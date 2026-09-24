@@ -1,0 +1,11 @@
+# 前端镜像以仓库根为构建上下文（frontend/Dockerfile 需要根目录的 pnpm-lock.yaml 与 workspace 配置）：
+# 先排除全部，再只放行安装与构建需要的文件；后端镜像以 backend/ 为上下文，用 backend/.dockerignore。
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!frontend/
+frontend/node_modules
+frontend/dist
+frontend/.env
+frontend/.env.*
