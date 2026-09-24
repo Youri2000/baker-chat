@@ -1,0 +1,3 @@
+# pip install -e 生成的包元数据与本地 SQLite 数据目录，不进仓库
+*.egg-info/
+data/*.db

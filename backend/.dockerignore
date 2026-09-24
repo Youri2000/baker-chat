@@ -1,0 +1,9 @@
+# 不进入 Docker 构建上下文：虚拟环境、缓存、测试、本地数据与密钥
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+tests
+data
+.env
