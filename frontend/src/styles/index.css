@@ -22,10 +22,12 @@
 
 /* 气泡与全局文字使用同一款字体；swap：先用回退字体渲染，字体到达后替换。
    原项目在挂载前等待字体是因为 canvas 测量气泡宽度依赖字形；新项目气泡尺寸由真实 DOM 排版得出，
-   字体晚到只会触发一次正常回流，不需要阻塞首屏。 */
+   字体晚到只会触发一次正常回流，不需要阻塞首屏。
+   💡 字体是 scripts/measure/subset-font.py 生成的子集（GB2312 汉字 + UI 文案 + 角色提示词字符），
+   4.32 MB → 0.93 MB；子集外的生僻字由浏览器回退到系统字体，详见 docs/interview.md#font-subset */
 @font-face {
   font-family: 'HarmonyOS Sans SC Medium';
-  src: url('../assets/fonts/HarmonyOS_Sans_SC_Medium.woff2') format('woff2');
+  src: url('../assets/fonts/HarmonyOS_Sans_SC_Medium.subset.woff2') format('woff2');
   font-weight: 500;
   font-style: normal;
   font-display: swap;
