@@ -12,7 +12,7 @@
     "prepare": "husky",
     "dev": "pnpm --filter frontend dev",
     "lint": "pnpm --filter frontend lint && pnpm --filter e2e lint",
-    "typecheck": "pnpm --filter frontend typecheck",
+    "typecheck": "pnpm --filter frontend typecheck && pnpm --filter e2e typecheck",
     "test": "pnpm --filter frontend test",
     "build": "pnpm --filter frontend build",
     "e2e": "pnpm --filter e2e test",
