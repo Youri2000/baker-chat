@@ -1,0 +1,4 @@
+# pnpm 工作区：根目录只放 Git 钩子与格式化工具，业务包在 frontend 与 e2e
+packages:
+  - frontend
+  - e2e

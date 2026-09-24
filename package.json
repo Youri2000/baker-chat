@@ -1,0 +1,46 @@
+{
+  "name": "baker-chat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "终末地 BAKER 会话消息：React + FastAPI 重写版",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "prepare": "husky",
+    "dev": "pnpm --filter frontend dev",
+    "lint": "pnpm --filter frontend lint && pnpm --filter e2e lint",
+    "typecheck": "pnpm --filter frontend typecheck",
+    "test": "pnpm --filter frontend test",
+    "build": "pnpm --filter frontend build",
+    "e2e": "pnpm --filter e2e test",
+    "format": "prettier --write ."
+  },
+  "lint-staged": {
+    "frontend/**/*.{ts,tsx}": [
+      "pnpm --dir frontend exec eslint --fix --max-warnings=0",
+      "prettier --write"
+    ],
+    "e2e/**/*.ts": [
+      "pnpm --dir e2e exec eslint --fix --max-warnings=0",
+      "prettier --write"
+    ],
+    "backend/**/*.py": [
+      "backend/.venv/bin/ruff check --fix",
+      "backend/.venv/bin/ruff format"
+    ],
+    "*.{md,json,yml,yaml,css}": [
+      "prettier --write"
+    ]
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.8.1",
+    "@commitlint/config-conventional": "^19.8.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.2",
+    "prettier": "^3.6.2",
+    "prettier-plugin-tailwindcss": "^0.6.14",
+    "tailwindcss": "^4.3.3"
+  }
+}

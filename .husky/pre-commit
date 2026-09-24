@@ -1,0 +1,2 @@
+# 提交前：只对暂存文件运行 lint 与格式化（配置在根 package.json 的 lint-staged 字段）
+pnpm exec lint-staged

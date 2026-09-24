@@ -1,0 +1,298 @@
+schema: comet.native.v4
+name: react-refactor-baker-chat
+language: zh-CN
+phase: build
+status: active
+state_version: 9
+brief: brief.md
+document_constraints_version: 1
+shape_confirmation_hash: c7592d54e4f23c2d3c21799ad6cb40900b4a0e3491e1c852af122e66edc170a7
+spec_changes:
+  - capability: baker-chat
+    operation: create
+    source: specs/baker-chat/spec.md
+workspace:
+  isolation: current
+  change_branch: null
+  target_branch: null
+  finish: null
+loop:
+  stage: building
+  goal_cycle: 4
+  iteration: 1
+  attempt: 0
+  retry_epoch: 0
+  failed_iteration_count: 0
+  no_progress_count: 0
+  execution_failure_count: 0
+  previous_unresolved_ids: []
+  next_action: submit-builder-candidate
+acceptance:
+  - id: A1
+    source: brief.md
+    text: 在仓库根目录执行 `git status` 可以看到这是一个 Git 仓库，`git remote -v` 的 `origin` 指向用户提供的
+      GitHub 仓库且 `main` 已推送；`git ls-files` 中不包含
+      `endfield-baker-chat/`、`yuan-Chat/`、`node_modules`、`.env` 和数据库文件；提交历史符合
+      Conventional Commits，不合规的提交信息会被 commitlint 拒绝。
+    result: pending
+    reason: null
+  - id: A2
+    source: brief.md
+    text: 在 `frontend/` 下 `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build`
+      全部通过；在 `backend/` 下 `ruff check`、`ruff format --check`、`pytest` 全部通过。
+    result: pending
+    reason: null
+  - id: A3
+    source: brief.md
+    text: '`pnpm e2e`（Playwright，后端设置 `AI_MOCK=1`）通过"注册 → 登录 → 选角色 → 发消息 →
+      看到逐行出现的回复气泡"这条冒烟用例。'
+    result: pending
+    reason: null
+  - id: A4
+    source: brief.md
+    text: "`.github/workflows/ci.yml` 包含 frontend、backend、e2e 三个任务，并在 push 和 PR
+      时触发；CI 执行的命令与本地相同；推送到 GitHub 后最近一次 Actions 运行为通过。"
+    result: pending
+    reason: null
+  - id: A5
+    source: brief.md
+    text: 在仓库根目录执行 `docker compose up --build` 后，可以在 http://localhost:5173
+      用演示账号登录，并且完成一次对话（真实 Key 或 `AI_MOCK=1` 均可）。
+    result: pending
+    reason: null
+  - id: A6
+    source: brief.md
+    text: 按 `docs/deploy.md` 完成部署后，Vercel 线上地址能够用演示账号登录，与任一角色完成一次真实的 DeepSeek
+      对话；刷新后消息仍在（数据存储在 Neon Postgres）。
+    result: pending
+    reason: null
+  - id: A7
+    source: brief.md
+    text: README 包含架构图、技术栈、本地启动、测试命令和线上地址；`docs/interview.md`
+      包含技术选型表（每项有候选方案与放弃理由）、至少 8 个技术亮点（每个按 背景与问题 → 调研与选型 → 如何发现问题 → 如何解决 → 结果与代价
+      五段写，附代码路径）、至少 3 项优化记录（每项有测量方法、优化前后实测数据和复现步骤）、至少 5 条问题排查记录（现象 → 定位 → 根因 →
+      修复 → 验证）；每个技术亮点对应的代码处有 💡 注释指回文档锚点。
+    result: pending
+    reason: null
+  - id: A8
+    source: brief.md
+    text: 注释规范落地：随机抽查 `frontend/src` 和 `backend/app` 下任意 5
+      个源文件，每个文件顶部都有中文文件级文档注释，文件内每个函数、组件、Hook、路由处理器和模型类都有中文文档注释，关键逻辑处有单行中文注释；emoji
+      只出现 ✅ / ⚠️ / 💡 三种且每个文件不超过 5 处；ESLint 的 jsdoc 规则和 ruff 的 D 规则在本地与 CI
+      中开启并通过。
+    result: pending
+    reason: null
+  - id: A9
+    source: specs/baker-chat/spec.md
+    text: 注册新账号 - WHEN 用户在 `/register` 输入合法且未被占用的用户名、密码和一致的确认密码并提交 - THEN
+      账号创建成功，页面自动进入已登录状态并跳到 `/`，看到全部 29 个角色主卡
+    result: pending
+    reason: null
+  - id: A10
+    source: specs/baker-chat/spec.md
+    text: 注册表单校验 - WHEN 用户名不合规、已被占用，或两次密码不一致时提交 - THEN
+      表单不跳转，在对应输入框下方显示中文错误原因；用户名被占用的错误来自后端返回的 409
+    result: pending
+    reason: null
+  - id: A11
+    source: specs/baker-chat/spec.md
+    text: 登录与错误密码 - WHEN 用户在 `/login` 输入正确的账号密码 - THEN 跳转到 `/` - WHEN 密码错误 - THEN
+      停留在登录页，显示"用户名或密码错误"
+    result: pending
+    reason: null
+  - id: A12
+    source: specs/baker-chat/spec.md
+    text: 路由守卫与退出 - WHEN 未登录直接访问 `/` - THEN 跳到 `/login` - WHEN 已登录用户在设置中点击"退出登录" -
+      THEN token 被清除并回到 `/login`；此时按浏览器后退也进不了 `/`
+    result: pending
+    reason: null
+  - id: A13
+    source: specs/baker-chat/spec.md
+    text: token 失效自动登出 - WHEN localStorage 里的 token 已过期或被篡改，用户在主页上发起任何请求 - THEN 前端跳到
+      `/login`，并提示"登录已过期，请重新登录"
+    result: pending
+    reason: null
+  - id: A14
+    source: specs/baker-chat/spec.md
+    text: 用户数据隔离 - WHEN 用户 A 创建会话并发送消息后，用户 B 登录 - THEN 用户 B 看不到 A
+      的任何会话、消息、提示词覆盖或设置；用 B 的 token 访问 A 的会话 ID 时返回 404
+    result: pending
+    reason: null
+  - id: A15
+    source: specs/baker-chat/spec.md
+    text: 刷新后数据仍在 - WHEN 用户发送消息、收到回复、修改世界观、切换我方头像性别、切换聊天条样式，然后刷新页面或换一个浏览器登录同一账号 -
+      THEN 以上内容全部恢复
+    result: pending
+    reason: null
+  - id: A16
+    source: specs/baker-chat/spec.md
+    text: 画布等比缩放 - WHEN 浏览器窗口改为 1280×720 - THEN 整个界面按 2/3 等比缩小，不出现滚动条，各元素的相对位置和原设计一致
+    result: pending
+    reason: null
+  - id: A17
+    source: specs/baker-chat/spec.md
+    text: 展开主卡并选中会话 - WHEN 用户点击"陈千语"主卡，再单击它下面的子卡 - THEN
+      主卡展开并变为选中，子卡出现黄色选中效果，右侧聊天区顶部显示"陈千语"，并加载这段会话的历史消息
+    result: pending
+    reason: null
+  - id: A18
+    source: specs/baker-chat/spec.md
+    text: 子卡预览文案 - WHEN 某段会话没有消息 - THEN 子卡按角色性别显示"和他聊聊 / 和她聊聊 / 和TA聊聊" - WHEN
+      会话最后一条消息含表情 token - THEN 预览里的表情显示为图片而不是 token 文本
+    result: pending
+    reason: null
+  - id: A19
+    source: specs/baker-chat/spec.md
+    text: 新建会话 - WHEN 用户选中"陈千语"主卡后点击"新建会话" - THEN 该主卡下多出一张空子卡并被选中；刷新后这张子卡仍然存在 - WHEN
+      没有选中任何主卡时点击"新建会话" - THEN 弹出"请先选中角色卡片"提示框
+    result: pending
+    reason: null
+  - id: A20
+    source: specs/baker-chat/spec.md
+    text: E 键切换工具栏 - WHEN 焦点不在输入框时按 E - THEN 工具栏隐藏，再按一次恢复显示 - WHEN 焦点在消息输入框内按 E -
+      THEN 输入框输入字母 e，工具栏不变化
+    result: pending
+    reason: null
+  - id: A21
+    source: specs/baker-chat/spec.md
+    text: 头像显隐与间距 - WHEN 会话依次为：我方、我方、AI、AI、我方 - THEN 头像只出现在第 1、3、5 条上；第 1→2 条和第 3→4
+      条间距为 14，第 2→3 条和第 4→5 条间距为 33
+    result: pending
+    reason: null
+  - id: A22
+    source: specs/baker-chat/spec.md
+    text: 聊天条样式循环 - WHEN 用户连续点击聊天条 3 次 - THEN 样式依次变为 v2 → v3 → v1；刷新后保持最后选中的样式
+    result: pending
+    reason: null
+  - id: A23
+    source: specs/baker-chat/spec.md
+    text: 切换我方头像性别 - WHEN 用户点击任一我方头像 - THEN 所有我方头像在管理员男/女之间切换；刷新后保持
+    result: pending
+    reason: null
+  - id: A24
+    source: specs/baker-chat/spec.md
+    text: 发送与换行 - WHEN 用户输入"你好"后按 Shift+Enter，再输入"在吗"，然后按 Enter - THEN
+      发出一条两行的我方消息，输入框清空
+    result: pending
+    reason: null
+  - id: A25
+    source: specs/baker-chat/spec.md
+    text: 插入表情 - WHEN 用户把光标放在"你好|世界"中间，打开表情弹层并点击第 1 个表情 - THEN
+      输入框显示"你好[表情图]世界"；发送后消息的存储文本为 `你好[sns_emoji_001]世界`，界面上显示为图片
+    result: pending
+    reason: null
+  - id: A26
+    source: specs/baker-chat/spec.md
+    text: 流式按行逐条出现 - WHEN 用户发送消息，AI 返回的流依次包含"第一行\n第二"和"行\n第三行" - THEN
+      收到第一个数据块后立即出现气泡"第一行"；第二个数据块到达后出现"第二行"；流结束后出现"第三行"。共 3 个 AI 气泡，刷新后仍为 3 条
+    result: pending
+    reason: null
+  - id: A27
+    source: specs/baker-chat/spec.md
+    text: 停止生成 - WHEN AI 已显示 1 个气泡、第二行尚未收完时，用户点击"停止" - THEN 请求中止，保留第 1
+      个气泡，加载气泡消失，输入框恢复可用；刷新后该会话只有这 1 条 AI 消息
+    result: pending
+    reason: null
+  - id: A28
+    source: specs/baker-chat/spec.md
+    text: "上游错误提示 - WHEN DeepSeek 返回 401 或请求超时 - THEN 会话中出现一个 AI 气泡，内容为 `[错误: …]`
+      形式的中文原因；输入框恢复可用"
+    result: pending
+    reason: null
+  - id: A29
+    source: specs/baker-chat/spec.md
+    text: 切换会话时回复写回原会话 - WHEN AI 正在回复"陈千语"会话时，用户切换到"洛茜"会话 - THEN
+      "洛茜"会话不出现加载气泡或回复；切回"陈千语"后能看到完整回复
+    result: pending
+    reason: null
+  - id: A30
+    source: specs/baker-chat/spec.md
+    text: 上下文只带最近 40 条 - WHEN 某会话已有 60 条上下文记录，用户再发送一条消息 - THEN 发给 DeepSeek 的
+      messages 为 2 条 system 加最近 40 条上下文（包含本条）；可见消息仍为全部
+    result: pending
+    reason: null
+  - id: A31
+    source: specs/baker-chat/spec.md
+    text: 每日额度 - WHEN 用户当天已发送 `DAILY_MESSAGE_LIMIT` 条消息后再次发送 - THEN
+      界面提示"今日额度已用完"，这条消息不出现在会话中，也不调用 DeepSeek
+    result: pending
+    reason: null
+  - id: A32
+    source: specs/baker-chat/spec.md
+    text: API Key 不外泄 - WHEN 检查前端构建产物和浏览器开发者工具的网络请求 - THEN 都不包含 DeepSeek API Key
+    result: pending
+    reason: null
+  - id: A33
+    source: specs/baker-chat/spec.md
+    text: 删除对话 - WHEN 某角色有 2 个会话，用户删除当前会话并确认 - THEN 该会话消失，相邻会话被选中；刷新后仍然只剩 1 个 - WHEN
+      该角色只剩 1 个会话 - THEN "删除对话"按钮为禁用状态
+    result: pending
+    reason: null
+  - id: A34
+    source: specs/baker-chat/spec.md
+    text: 清空消息与清空上下文互不影响 - WHEN 用户执行"清空消息"后继续提问"我刚才说了什么" - THEN 界面上旧消息消失，但 AI
+      仍能引用之前的对话内容 - WHEN 用户执行"清空上下文" - THEN 界面消息保留，之后 AI 不再记得之前的内容
+    result: pending
+    reason: null
+  - id: A35
+    source: specs/baker-chat/spec.md
+    text: 修改角色提示词 - WHEN 用户为"陈千语"保存自定义提示词 - THEN 下拉框里该角色显示"已自定义"；之后该角色的请求使用新的提示词 -
+      WHEN 用户点击"恢复默认" - THEN 徽标消失，之后使用内置提示词
+    result: pending
+    reason: null
+  - id: A36
+    source: specs/baker-chat/spec.md
+    text: 连接测试 - WHEN 后端配置了有效的 DeepSeek Key，用户点击"连接测试" - THEN 显示"连接成功" - WHEN Key 无效
+      - THEN 显示"连接失败"和原因
+    result: pending
+    reason: null
+  - id: A37
+    source: specs/baker-chat/spec.md
+    text: 数据管理批量操作 - WHEN 用户点击"删除全部对话"并确认 - THEN 每个角色只剩 1 个空会话，统计中的对话数和消息数变为 0
+    result: pending
+    reason: null
+builder_handoff: null
+blockers: []
+verification: null
+history:
+  - goal_cycle: 1
+    iteration: 0
+    attempt: 0
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: Native confirmed acceptance criteria changed
+      truncated: false
+    completed_at: 2026-09-24T02:46:47.332Z
+  - goal_cycle: 2
+    iteration: 0
+    attempt: 0
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: Native confirmed acceptance criteria changed
+      truncated: false
+    completed_at: 2026-09-24T02:53:44.967Z
+  - goal_cycle: 3
+    iteration: 0
+    attempt: 0
+    outcome: recovery
+    unresolved_ids: []
+    summary:
+      text: Native confirmed acceptance criteria changed
+      truncated: false
+    completed_at: 2026-09-24T03:19:38.712Z
+history_overflow:
+  dropped_entries: 0
+  first_dropped_at: null
+  last_dropped_at: null
+  outcome_counts:
+    pass: 0
+    fail: 0
+    blocked: 0
+    execution-error: 0
+    recovery: 0
+verification_result: pending
+verification_report: null
+archived: false
+created_at: 2026-09-23T06:45:34.989Z

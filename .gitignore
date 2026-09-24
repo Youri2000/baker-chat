@@ -1,0 +1,41 @@
+# >>> Comet managed project state >>>
+!/.comet/
+/.comet/*
+!/.comet/config.yaml
+# <<< Comet managed project state <<<
+
+# 参考用的旧项目，不进入仓库
+/endfield-baker-chat/
+/yuan-Chat/
+
+# 依赖与构建产物
+node_modules/
+dist/
+build/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+coverage/
+playwright-report/
+test-results/
+
+# 环境变量与本地数据
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+
+# 系统与编辑器
+.DS_Store
+.idea/
+.vscode/
+.codegraph/
+
+# 本机 Claude Code 权限与 Hook 配置（含绝对路径）
+.claude/settings.local.json
+# 后端本地数据库与打包元数据
+backend/data/
+backend/*.egg-info/

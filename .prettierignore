@@ -1,0 +1,17 @@
+# 不格式化的内容：依赖、构建产物、参考用旧项目、Comet 产物、锁文件
+node_modules
+dist
+build
+.venv
+endfield-baker-chat
+yuan-Chat
+docs/comet
+.comet
+pnpm-lock.yaml
+playwright-report
+test-results
+# Comet 与平台文件、逐字迁移的数据文件
+.claude
+CLAUDE.md
+AGENTS.md
+backend/app/data/*.json

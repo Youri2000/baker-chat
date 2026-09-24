@@ -1,0 +1,16 @@
+# 编辑器基础设置：统一缩进与换行，避免跨编辑器的格式差异
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.py]
+indent_size = 4
+
+[Makefile]
+indent_style = tab
