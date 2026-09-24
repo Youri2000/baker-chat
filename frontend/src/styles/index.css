@@ -1,0 +1,250 @@
+/*
+ * 唯一的全局样式：@import tailwindcss、@theme 设计令牌、@font-face、@utility scroll-mask、基础重置。
+ * 令牌与原项目 _variables.scss / constants/colors.ts / _transitions.scss 一一对应，是视觉规范的唯一来源；
+ * 组件只用 Tailwind 工具类（设计稿数值用任意值原样写），不再新增全局 CSS。
+ *
+ * 令牌命名规则（Tailwind v4 命名空间 → 生成的工具类）：
+ *   --color-<原 SCSS 变量去掉 $color- 前缀>   → bg-card-bg / text-subcard-text / border-chat-frame …
+ *     colors.ts 中的内联色同样收进来：bubble-mine / bubble-other / bubble-text-* / loading-dot-* / app-mask
+ *   --text-<用途>                               → text-title / text-name / text-subcard / text-bubble（字号；bubble 自带行高 1.5）
+ *   --font-<字体栈名>                           → font-harmony / font-bubble
+ *   --radius-<元素>                             → rounded-card / rounded-subcard / rounded-bubble / rounded-dialog …
+ *   --ease-<名>                                 → ease-default / ease-out（与原 $ease-* 相同，都是 CSS 关键字）
+ *   --anim-<名>                                 → 纯 CSS 变量（Tailwind 无时长命名空间），用法 duration-(--anim-fast)
+ *   --animate-<keyframes 名>                    → animate-chat-in / animate-loading-dot …（keyframes 与令牌同名）
+ *
+ * scroll-mask 用法（参数全部是 CSS 变量，calc 里的空格写成下划线）：
+ *   <div class="scroll-mask [--mask-top-in:0px] [--mask-top-out:5px]
+ *               [--mask-bottom-in:calc(100%_-_80px)] [--mask-bottom-out:calc(100%_-_40px)] [--mask-right:14px]">
+ *   缺省值：top-in 0 / top-out 0 / bottom-in 100% / bottom-out 100% / right 14px（右侧 14px 是滚动条列，始终不遮）
+ */
+@import 'tailwindcss';
+
+/* 气泡与全局文字使用同一款字体；swap：先用回退字体渲染，字体到达后替换。
+   原项目在挂载前等待字体是因为 canvas 测量气泡宽度依赖字形；新项目气泡尺寸由真实 DOM 排版得出，
+   字体晚到只会触发一次正常回流，不需要阻塞首屏。 */
+@font-face {
+  font-family: 'HarmonyOS Sans SC Medium';
+  src: url('../assets/fonts/HarmonyOS_Sans_SC_Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* static：全部令牌无条件输出到 :root。默认只输出被工具类引用的变量，
+   而气泡 SVG 的 fill、内联 style 里的 var(--color-…) Tailwind 扫描不到，会拿到空值 */
+@theme static {
+  /* ---- 字体（$font-harmony / $font-bubble）---------------------------------- */
+  --font-harmony:
+    'HarmonyOS Sans SC Medium', 'HarmonyOS Sans SC', 'MiSans', 'PingFang SC', 'Microsoft YaHei',
+    sans-serif;
+  --font-bubble: 'HarmonyOS Sans SC Medium', 'HarmonyOS Sans SC', 'Microsoft YaHei', sans-serif;
+
+  /* ---- 字号（$font-size-*）-------------------------------------------------- */
+  --text-title: 21.15px; /* 顶部 BAKER 标题 */
+  --text-name: 24.12px; /* 干员名 / 聊天条姓名 */
+  --text-subcard: 20.88px; /* 子卡预览文字 */
+  --text-bubble: 20.88px; /* 气泡文字 */
+  --text-bubble--line-height: 1.5;
+
+  /* ---- 颜色（$color-*）------------------------------------------------------ */
+  --color-bg-root: #141413; /* html/body 背景 */
+  --color-text-primary: #fff;
+  --color-subcard-text: #e3e1e1;
+  --color-subcard-text-selected: #1c1c1c;
+  --color-card-bg: #3e3f3d;
+  --color-subcard-bg: #2b2927;
+  --color-subcard-icon-box: #353534;
+  --color-subcard-line: #1c1c1c;
+  --color-subcard-selected: #ffef00; /* 子卡选中黄层 / 对话框主按钮 */
+  --color-avatar-border: #575657;
+  --color-avatar-border-hover: #5e5d5e;
+  --color-hover-overlay: rgba(255, 255, 255, 0.12); /* 主卡/子卡 hover 白层 */
+  --color-hover-overlay-gray: rgba(0, 0, 0, 0.2); /* 输入面板圆形按钮 hover 灰遮罩 */
+  --color-chat-tint: rgba(255, 255, 255, 0.05); /* 聊天区浅色叠加 */
+  --color-chat-frame: rgb(202, 201, 201); /* 聊天框线 / 对话框边框 */
+  --color-chat-bar-magenta: rgb(226, 2, 226);
+  --color-chat-bar-yellow: rgb(243, 241, 0);
+  --color-chat-bar-cyan: rgb(1, 241, 241);
+  --color-panel-bg: #3c3b39; /* 底部输入面板 */
+  --color-btn-bg: #f0eeee; /* 输入面板圆形按钮 / 对话框按钮 */
+  --color-btn-icon: #444343; /* 输入面板按钮图标 / 对话框按钮文字 */
+  --color-scrollbar-character: #cac9c9;
+  --color-scrollbar-chat: #c8c6c6;
+
+  /* ---- 颜色（constants/colors.ts 内联色）------------------------------------ */
+  --color-app-mask: rgba(0, 0, 0, 0.85); /* 背景图上的遮罩 */
+  --color-bubble-mine: #f0eeee;
+  --color-bubble-other: #464444;
+  --color-bubble-text-mine: #000;
+  --color-bubble-text-other: #fff;
+  --color-loading-dot-mine: #222;
+  --color-loading-dot-other: #fff;
+
+  /* ---- 颜色（组件 SCSS 中多处复用、此文件冻结后无法再补的值）------------------ */
+  --color-dialog-mask: rgba(0, 0, 0, 0.55); /* 对话框遮罩 */
+  --color-accent: #fcf33f; /* 设置对话框强调色：tab 下划线 / 主按钮 / 徽标 */
+  --color-danger: #7a2e2e; /* 删除类按钮 */
+  --color-stop: #c44; /* 输入面板停止按钮 */
+  --color-emoji-pop: #dedcdc; /* 表情弹层背景 */
+  --color-input-text: #2a2a2a; /* 胶囊输入框文字 */
+
+  /* ---- 圆角 ----------------------------------------------------------------- */
+  --radius-card: 4.39px; /* 主卡 */
+  --radius-subcard: 4.12px; /* 子卡 */
+  --radius-icon-box: 2.74px; /* 子卡图标底 */
+  --radius-avatar-card: 6px; /* 主卡头像框 */
+  --radius-bubble: 13.65px; /* 气泡 rect rx/ry */
+  --radius-frame: 12px; /* 聊天框底部两角 */
+  --radius-panel: 16px; /* 输入面板 / 表情弹层 */
+  --radius-dialog: 14px; /* 对话框面板 */
+
+  /* ---- 缓动（$ease-*）------------------------------------------------------- */
+  --ease-default: ease;
+  --ease-out: ease-out; /* 覆盖 Tailwind 默认曲线，与原项目一致 */
+
+  /* ---- 动画时长（$anim-*，无对应工具类，用 duration-(--anim-xxx)）------------ */
+  --anim-fast: 0.2s; /* 主卡 hover 层 */
+  --anim-card-collapse: 0.3s; /* 卡片折叠位移 / 箭头旋转 */
+  --anim-subcard: 0.25s; /* 子卡 texture/icon/text/deco 联动 */
+  --anim-subcard-arrow-first: 0.15s; /* 子卡首张 arrow */
+  --anim-subcard-selected: 0.1s; /* 子卡选中黄层 scaleX */
+  --anim-chat-in: 0.3s; /* 聊天区入场 */
+  --anim-collapse: 0.25s; /* 子卡展开/收起 */
+  --anim-bubble: 0.1s; /* 气泡尺寸过渡 / 加载气泡展开 */
+  --anim-dialog: 0.15s; /* 对话框淡入 */
+  --anim-pop: 0.3s; /* 表情弹层展开 */
+
+  /* ---- 关键帧动画（_transitions.scss + 组件内 keyframes）---------------------- */
+  --animate-chat-in: chat-in 0.3s ease; /* 切换会话时聊天区入场 */
+  --animate-loading-dot: loading-dot 0.8s ease-in-out infinite; /* 加载气泡方块闪烁 */
+  --animate-card-chat-wiggle: card-chat-wiggle 4s ease-in-out infinite; /* 主卡角标晃动 */
+  --animate-bubble-text-fade: bubble-text-fade 50ms ease; /* 气泡文字淡入 */
+  --animate-collapse-in: collapse-in 0.25s ease; /* 子卡展开入场（原 collapse transition） */
+  --animate-pop-up: pop-up 0.3s ease-out; /* 表情弹层向上展开（原 chat-input-pop） */
+  --animate-dialog-in: dialog-in 0.15s ease-out; /* 对话框淡入（原 dc/dm/ns transition） */
+
+  @keyframes chat-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes loading-dot {
+    0%,
+    100% {
+      opacity: 0.2;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  /* 周期 4s：左右各晃两次（2s）后静止等待 2s */
+  @keyframes card-chat-wiggle {
+    0% {
+      transform: rotate(0deg);
+    }
+    5% {
+      transform: rotate(-14deg);
+    }
+    10% {
+      transform: rotate(14deg);
+    }
+    15% {
+      transform: rotate(-14deg);
+    }
+    20% {
+      transform: rotate(14deg);
+    }
+    25%,
+    100% {
+      transform: rotate(0deg);
+    }
+  }
+
+  @keyframes bubble-text-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes collapse-in {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes pop-up {
+    from {
+      opacity: 0;
+      transform: scaleY(0);
+    }
+    to {
+      opacity: 1;
+      transform: scaleY(1);
+    }
+  }
+
+  @keyframes dialog-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+/* 滚动容器渐隐：纵向 top-in→top-out 渐入、bottom-in→bottom-out 渐出；
+   横向只保留右侧 --mask-right 宽的一列完全不遮（滚动条）。两张 mask 默认取并集，
+   因此右侧列不受纵向渐隐影响，与原 scroll-mask mixin 行为一致。 */
+@utility scroll-mask {
+  mask-image:
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent var(--mask-top-in, 0px),
+      #000 var(--mask-top-out, 0px),
+      #000 var(--mask-bottom-in, 100%),
+      transparent var(--mask-bottom-out, 100%),
+      transparent 100%
+    ),
+    linear-gradient(
+      to right,
+      transparent calc(100% - var(--mask-right, 14px)),
+      #000 calc(100% - var(--mask-right, 14px))
+    );
+}
+
+/* 基础重置：只补 Tailwind preflight 没覆盖的部分（preflight 已做 margin/padding 归零、
+   box-sizing、img 块级化——注意表情 <img> 因此要显式 inline） */
+@layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--color-bg-root);
+  }
+
+  body {
+    font-family: var(--font-harmony);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
