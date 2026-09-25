@@ -196,11 +196,11 @@ AI_MOCK=1 试跑：60 条 35.5 s，全部记为 `-`（mock 流没有 usage 帧�
 - `#bundle-size`：提示词移到后端 + 去依赖 + 子集化的产物对比（第 4 节；`characters.py` 的 `#prompts-backend` 可引用同一表）。
 - `#first-bubble`、`#prompt-tokens`：两份等真实 Key 的数据，脚本与复现命令在第 5 节。
 
-## 7. 真实 DeepSeek 数据（2026-09-24，主会话补测）
+## 8. 真实 DeepSeek 数据（2026-09-24，主会话补测）
 
 后端配真实 Key（`deepseek-flash`，`https://api.deepseek.com`），前端 `pnpm build` 后 `vite preview` 在 5182，后端 8030，临时 SQLite，本机网络直连（不走代理）。
 
-### 7.1 发现：V4 系列默认开启思考模式，流式分段失效
+### 8.1 发现：V4 系列默认开启思考模式，流式分段失效
 
 **现象**：第一次跑 `first-bubble.mjs`（后端尚未关闭思考），5 轮首个气泡 5756 / 4926 / 1407 / 5017 / 5029 ms，全文完成 5757 / 4926 / 1407 / 5017 / 5030 ms——首个气泡和全文几乎同时出现，中位数都是 5017 ms，"流式按行"对首句毫无提升。
 
@@ -218,7 +218,7 @@ AI_MOCK=1 试跑：60 条 35.5 s，全部记为 `-`（mock 流没有 usage 帧�
 
 **验证**：见 6.2；直连上游对比：首个正文 1945 ms → 765 ms，completion token 300 → 46。
 
-### 7.2 首个 AI 气泡出现时间（关闭思考后）
+### 8.2 首个 AI 气泡出现时间（关闭思考后）
 
 `node scripts/measure/first-bubble.mjs --base http://localhost:5182 --api http://localhost:8030 --user demo --password demo123 --character 陈千语 --prompt "你好，简单介绍一下你自己吧，分三句话说，每句话单独一行。" --runs 5`
 
@@ -236,7 +236,7 @@ AI_MOCK=1 试跑：60 条 35.5 s，全部记为 `-`（mock 流没有 usage 帧�
 - 首个数据块 531 ms 到首个气泡 751 ms 之间的 220 ms，是等第一行写完（第一个 `\n`）的时间。
 - 脚本首版还想用 CDP 的 `loadingFinished` 记录响应结束时刻，但多数轮次收不到该事件（前端处理完 `[DONE]` 后释放了流），已删掉这一列，只保留"首个数据块"；修正后重跑一次：首个数据块 583 ms、首个气泡 718 ms、全文 1006 ms，与上表一致。
 
-### 7.3 prompt_tokens 曲线与前缀缓存命中（60 条连续消息）
+### 8.3 prompt_tokens 曲线与前缀缓存命中（60 条连续消息）
 
 `python3 scripts/measure/prompt-tokens.py --api http://localhost:8030 --user demo --password demo123 --character 陈千语 --count 60`
 
