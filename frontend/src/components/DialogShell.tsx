@@ -20,6 +20,8 @@ export interface DialogShellProps {
   titleGap?: number;
   /** settings：原设置对话框自带的外壳样式（见文件注释） */
   variant?: 'default' | 'settings';
+  /** 不渲染右上角 ×（只有"确定"一个按钮的提示框） */
+  hideClose?: boolean;
   children: ReactNode;
 }
 
@@ -31,6 +33,7 @@ export function DialogShell({
   width = 348,
   titleGap = 14,
   variant = 'default',
+  hideClose = false,
   children,
 }: DialogShellProps) {
   if (!open) return null;
@@ -53,18 +56,20 @@ export function DialogShell({
         )}
         style={{ width }}
       >
-        <button
-          type="button"
-          aria-label="关闭"
-          className={
-            settings
-              ? 'absolute top-3 right-4 cursor-pointer text-[24px] leading-none text-text-primary opacity-50 hover:opacity-100'
-              : 'absolute top-2 right-2.5 h-7 w-7 cursor-pointer rounded-full text-[22px] leading-none text-subcard-text hover:bg-hover-overlay'
-          }
-          onClick={onClose}
-        >
-          ×
-        </button>
+        {!hideClose && (
+          <button
+            type="button"
+            aria-label="关闭"
+            className={
+              settings
+                ? 'absolute top-3 right-4 cursor-pointer text-[24px] leading-none text-text-primary opacity-50 hover:opacity-100'
+                : 'absolute top-2 right-2.5 h-7 w-7 cursor-pointer rounded-full text-[22px] leading-none text-subcard-text hover:bg-hover-overlay'
+            }
+            onClick={onClose}
+          >
+            ×
+          </button>
+        )}
         {title !== undefined &&
           (settings ? (
             <h2 className="mb-4 text-[20px] font-semibold text-text-primary">{title}</h2>

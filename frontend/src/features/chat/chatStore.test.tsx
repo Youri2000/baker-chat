@@ -1,13 +1,22 @@
 /**
- * @file chatStore 流式测试：delta 逐行产生 bubbles、[DONE] 后重拉、停止先 POST stop 再结束本地 fetch、
- * 切换会话后流仍写回原会话；以及选中/折叠的基础行为。
+ * @file chatStore 流式测试：delta 逐行产生 bubbles、发送时子卡预览立即更新、[DONE] 后重拉、
+ * 停止先 POST stop 再结束本地 fetch、切换会话后流仍写回原会话、reset 中止流并回到初始状态；
+ * 以及选中/折叠、删除会话 409 后重拉的基础行为。服务端发完 [DONE] 即关闭流，桩也照此 close。
  */
 import { beforeEach, describe, expect, it, type Mock } from 'vitest';
+import { useToastStore } from '@/components/toastStore';
 import { CHARACTERS } from '@/constants/characters';
 import { useChatStore } from '@/features/chat/chatStore';
 import type { Conversation, Message } from '@/features/chat/api';
 import { tokenStorage } from '@/lib/http';
-import { flush, jsonResponse, mockFetch, sseResponse, type SseHandle } from '@/test/mockFetch';
+import {
+  flush,
+  jsonResponse,
+  mockFetch,
+  noContent,
+  sseResponse,
+  type SseHandle,
+} from '@/test/mockFetch';
 
 /** 两个会话：陈千语(1)、洛茜(2) */
 const CONVERSATIONS: Conversation[] = [
@@ -92,6 +101,38 @@ describe('chatStore', () => {
     expect(useChatStore.getState().activeCharacterName).toBe('陈千语');
   });
 
+  /** 删除收到 409（本地列表落后于服务端）：toast 后重拉会话列表对齐 */
+  it('deleteConversation 收到 409 时重拉会话列表', async () => {
+    useChatStore.setState({ conversations: CONVERSATIONS, activeConversationId: 2 });
+    const fetchMock = mockFetch((req) => {
+      if (req.method === 'DELETE') return jsonResponse({ detail: '该角色至少保留一个会话' }, 409);
+      return jsonResponse([CONVERSATIONS[1]]);
+    });
+    await useChatStore.getState().deleteConversation(2);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method ?? 'GET')).toEqual([
+      'DELETE',
+      'GET',
+    ]);
+    expect(useChatStore.getState().conversations).toEqual([CONVERSATIONS[1]]);
+    expect(useChatStore.getState().activeConversationId).toBe(2);
+    expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual([
+      '该角色至少保留一个会话',
+    ]);
+  });
+
+  /** 删除成功（204）不重拉 */
+  it('deleteConversation 成功时只发 DELETE', async () => {
+    useChatStore.setState({
+      conversations: CONVERSATIONS,
+      activeConversationId: 1,
+      messagesByConversation: { 1: [] },
+    });
+    const fetchMock = mockFetch(() => noContent());
+    await useChatStore.getState().deleteConversation(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(useChatStore.getState().conversations).toEqual([CONVERSATIONS[0]]);
+  });
+
   /** 选中会话：拉消息并选中所属主卡 */
   it('selectConversation 拉取消息并选中所属主卡', async () => {
     const { setMessages } = setupServer();
@@ -112,10 +153,14 @@ describe('chatStore', () => {
     await useChatStore.getState().selectConversation(1);
     const sending = useChatStore.getState().sendMessage('在吗');
     await flush();
-    // 乐观追加我方消息 + 加载中
+    // 乐观追加我方消息 + 加载中；子卡预览立即变成刚发出的消息
     expect(useChatStore.getState().messagesByConversation[1]).toMatchObject([
       { side: 'mine', text: '在吗' },
     ]);
+    expect(useChatStore.getState().conversations[0].last_message).toEqual({
+      side: 'mine',
+      text: '在吗',
+    });
     expect(useChatStore.getState().streaming).toMatchObject({
       conversationId: 1,
       bubbles: [],
@@ -128,6 +173,7 @@ describe('chatStore', () => {
     await flush();
     expect(useChatStore.getState().streaming?.bubbles).toEqual(['第一行', '第二行']);
     sse.push('data: [DONE]\n\n');
+    sse.close();
     await sending;
   });
 
@@ -147,11 +193,38 @@ describe('chatStore', () => {
       msg(12, 'other', '第二行'),
     ]);
     sse.push('data: [DONE]\n\n');
+    sse.close();
     await sending;
     const s = useChatStore.getState();
     expect(s.streaming).toBeNull();
     expect(s.messagesByConversation[1].map((m) => m.id)).toEqual([10, 11, 12]);
     expect(s.conversations[0].last_message).toEqual({ side: 'other', text: '第二行' });
+  });
+
+  /** reset：中止进行中的流、回到初始状态；流结束后不再重拉（退出登录后重拉会得到 401） */
+  it('reset 中止进行中的流并回到初始状态，之后不再重拉消息', async () => {
+    const server = setupServer();
+    const { sending } = await startStreaming(server);
+    useChatStore.getState().toggleCharacter('洛茜');
+    const { controller } = useChatStore.getState().streaming!;
+
+    useChatStore.getState().reset();
+
+    expect(controller.signal.aborted).toBe(true);
+    expect(useChatStore.getState()).toMatchObject({
+      conversations: [],
+      messagesByConversation: {},
+      activeConversationId: null,
+      activeCharacterName: null,
+      streaming: null,
+    });
+    expect(Object.values(useChatStore.getState().collapsedCharacters).every(Boolean)).toBe(true);
+    // 桩流不会因 abort 拒绝 read()，推一帧唤醒读取；abort 后既不产生气泡也不重拉
+    server.sse.push('data: {"delta":"行\\n"}\n\n');
+    await sending;
+    expect(useChatStore.getState().streaming).toBeNull();
+    expect(useChatStore.getState().messagesByConversation).toEqual({});
+    expect(server.paths()).toEqual(['messages', 'chat']);
   });
 
   /**
@@ -165,6 +238,7 @@ describe('chatStore', () => {
         { ...msg(11, 'other', '第一行'), status: 'aborted' },
       ]);
       server.sse.push('data: [DONE]\n\n');
+      server.sse.close();
       return { stopped: true };
     });
     const { sending } = await startStreaming(server);
@@ -217,6 +291,7 @@ describe('chatStore', () => {
     await useChatStore.getState().stopGeneration();
     await first;
     server.sse.push('data: [DONE]\n\n');
+    server.sse.close();
     await sending;
     expect(server.paths().filter((p) => p === 'chat/stop')).toHaveLength(1);
   });
@@ -238,6 +313,7 @@ describe('chatStore', () => {
     });
     setMessages(1, [msg(10, 'mine', '在吗'), msg(11, 'other', '回复')]);
     sse.push('data: [DONE]\n\n');
+    sse.close();
     await sending;
     const s = useChatStore.getState();
     expect(s.messagesByConversation[1].map((m) => m.text)).toEqual(['在吗', '回复']);
@@ -257,6 +333,7 @@ describe('chatStore', () => {
     await flush();
     expect(useChatStore.getState().streaming?.bubbles).toEqual(['[错误: 上游响应超时]']);
     sse.push('data: [DONE]\n\n');
+    sse.close();
     await sending;
   });
 });

@@ -3,7 +3,7 @@
  * `data: {delta|usage|error}` 与 `[DONE]` 帧。每次调用由调用方传入独立的 AbortSignal。
  * 💡 不用 EventSource：它只支持 GET 且不能带 Authorization 头，详见 docs/interview.md#sse
  */
-import { assertOk, buildHeaders } from '@/lib/http';
+import { API_BASE, assertOk, buildHeaders } from '@/lib/http';
 
 /** 上游 token 用量（最后一帧，可选） */
 export interface SseUsage {
@@ -59,22 +59,22 @@ function dispatchLine(line: string, options: StreamSseOptions): boolean {
 }
 
 /**
- * ✅ POST 一个 JSON body 并消费 SSE 响应，直到 [DONE]、流结束或被 abort。
+ * ✅ POST 一个 JSON body 并消费 SSE 响应，直到流结束或被 abort；path 与 http() 同样不含 `/api`。
  * 非 2xx 时抛 ApiError（如 429 今日额度已用完）；abort 后静默返回且不再触发任何回调。
  */
 export async function streamSse(
-  url: string,
+  path: string,
   body: unknown,
   options: StreamSseOptions,
 ): Promise<void> {
   const { signal } = options;
-  const res = await fetch(url, {
+  const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers: buildHeaders(options.token),
     body: JSON.stringify(body),
     signal,
   });
-  await assertOk(res, options.token !== null);
+  await assertOk(res, path);
   // 后端契约保证 text/event-stream 一定有响应体
   const reader = res.body!.getReader();
   // ⚠️ decode(…, {stream: true}) 让被切在两个 chunk 之间的多字节字符留在解码器内部，不会产出乱码
@@ -91,7 +91,11 @@ export async function streamSse(
       buffer = rest;
       for (const line of lines) {
         if (dispatchLine(line, options)) {
-          await reader.cancel();
+          // ⚠️ [DONE] 后不 cancel()：Chromium 会把主动取消的请求记为 net::ERR_ABORTED；
+          // 服务端发完 [DONE] 即关闭，读到流结束即可，之后的内容按契约不存在
+          while (!(await reader.read()).done) {
+            // 只等待流结束
+          }
           return;
         }
       }

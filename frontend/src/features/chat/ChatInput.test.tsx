@@ -1,6 +1,7 @@
 /**
  * @file ChatInput 测试：Enter 发送并清空、Shift+Enter 换行、空白不发送、粘贴只取纯文本、
- * 表情插入到光标处并序列化为 token、流式期间禁用输入且发送按钮变停止、弹层外 pointerdown 关闭。
+ * 表情插入到光标处并序列化为 token、输入框失焦后表情插到末尾、流式期间禁用输入且发送按钮变停止、
+ * 弹层外 pointerdown 关闭。
  */
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -90,6 +91,24 @@ describe('ChatInput', () => {
     expect(img?.nextSibling?.textContent).toBe('世界');
     await userEvent.keyboard('{Enter}');
     expect(sendMessage).toHaveBeenCalledWith('你好[sns_emoji_001]世界');
+  });
+
+  /** 输入框失焦（选区在别处）后点表情：插到内容末尾而不是开头，焦点回到输入框 */
+  it('输入框失焦后表情插到末尾', async () => {
+    const { sendMessage, input } = setup();
+    await userEvent.type(input, '你好');
+    // 模拟 Chrome：contenteditable 失焦后再 focus() 会把光标放到开头
+    input.addEventListener('focus', () => window.getSelection()!.collapse(input, 0));
+    input.blur();
+    window.getSelection()!.collapse(document.body, 0);
+    await userEvent.click(screen.getByRole('button', { name: '表情' }));
+    await userEvent.click(screen.getByRole('button', { name: '[sns_emoji_001]' }));
+    const img = input.querySelector('img')!;
+    expect(img.previousSibling?.textContent).toBe('你好');
+    expect(img.nextSibling).toBeNull();
+    expect(document.activeElement).toBe(input);
+    await userEvent.keyboard('{Enter}');
+    expect(sendMessage).toHaveBeenCalledWith('你好[sns_emoji_001]');
   });
 
   /** 弹层外按下指针关闭弹层，表情按钮自身不关闭 */

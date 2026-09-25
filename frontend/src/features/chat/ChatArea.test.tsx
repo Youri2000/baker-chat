@@ -1,6 +1,7 @@
 /**
  * @file ChatArea 测试：空态文案；选中会话后显示角色名、消息与表情图片、头像显隐；点击聊天条循环样式并 PATCH；
- * 点击我方头像切换性别并 PATCH；流式期间只有流所属会话显示临时气泡与加载气泡，停止按钮始终可见。
+ * 点击我方头像切换性别并 PATCH；PATCH 未返回时连点两次分别发 1、2 / female、male（基于最新值而不是渲染时的值）；
+ * 流式期间只有流所属会话显示临时气泡与加载气泡，停止按钮始终可见。
  */
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -48,6 +49,18 @@ function selectConversation(messages: Message[]) {
     activeCharacterName: '陈千语',
     messagesByConversation: { 1: messages, 2: [] },
   });
+}
+
+/** PATCH 一直不返回的桩（模拟延迟 ≥ 点击间隔），记录每次请求体 */
+function pendingPatch() {
+  const bodies: unknown[] = [];
+  mockFetch(
+    (req) =>
+      new Promise<Response>(() => {
+        bodies.push(req.body);
+      }),
+  );
+  return bodies;
 }
 
 describe('ChatArea', () => {
@@ -120,6 +133,32 @@ describe('ChatArea', () => {
     expect(portrait()).toContain('管理员_男');
     await userEvent.click(avatar);
     await waitFor(() => expect(portrait()).toContain('管理员_女'));
+  });
+
+  /** PATCH 未返回时连点聊天条两次：第二次基于第一次的乐观值，请求体依次为 1、2，界面已是 v3 */
+  it('PATCH 未返回时连点聊天条两次分别发 1、2', async () => {
+    selectConversation([]);
+    const bodies = pendingPatch();
+    render(<ChatArea />);
+    const strip = screen.getByRole('button', { name: '切换聊天条样式' });
+    await userEvent.click(strip);
+    await userEvent.click(strip);
+    expect(bodies).toEqual([{ strip_variant: 1 }, { strip_variant: 2 }]);
+    expect(strip.getAttribute('src')).toContain('chat_strip_v3');
+  });
+
+  /** PATCH 未返回时连点我方头像两次：female、male，头像回到男 */
+  it('PATCH 未返回时连点我方头像两次分别发 female、male', async () => {
+    selectConversation([msg(1, 'mine', '在吗')]);
+    const bodies = pendingPatch();
+    render(<ChatArea />);
+    const avatar = screen.getByRole('button', { name: '切换我方头像' });
+    await userEvent.click(avatar);
+    await userEvent.click(avatar);
+    expect(bodies).toEqual([{ my_gender: 'female' }, { my_gender: 'male' }]);
+    expect(decodeURIComponent(avatar.querySelectorAll('img')[1].getAttribute('src')!)).toContain(
+      '管理员_男',
+    );
   });
 
   /** 流式期间：当前会话显示已完成的行与加载气泡；切到其他会话后两者都不显示，但停止按钮仍在 */

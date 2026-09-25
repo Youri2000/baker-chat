@@ -155,7 +155,11 @@ async function runScenario(useMemo: boolean): Promise<Stats> {
   for (const frame of FRAMES) {
     await act(async () => sse.push(frame));
   }
-  await act(async () => sse.push('data: [DONE]\n\n'));
+  // 服务端发完 [DONE] 即关闭流
+  await act(async () => {
+    sse.push('data: [DONE]\n\n');
+    sse.close();
+  });
   await act(async () => releaseMessages());
   await sending;
   cleanup();

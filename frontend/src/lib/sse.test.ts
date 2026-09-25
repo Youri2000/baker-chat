@@ -1,5 +1,6 @@
 /**
- * @file SSE 解析测试：行缓冲跨块、多字节字符被切开、单块多帧、错误帧、[DONE]、abort 后不再回调、非 2xx。
+ * @file SSE 解析测试：行缓冲跨块、多字节字符被切开、单块多帧、错误帧、[DONE] 后不 cancel 而是读到流结束、
+ * abort 后不再回调、非 2xx。
  */
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/lib/http';
@@ -42,8 +43,18 @@ function startStream(signal = new AbortController().signal): {
     onError: vi.fn(),
     onDone: vi.fn(),
   };
-  const done = streamSse('http://backend.test/api/conversations/1/chat', { text: 'hi' }, options);
+  const done = streamSse('/conversations/1/chat', { text: 'hi' }, options);
   return { sse, options, done };
+}
+
+/** promise 是否已经落定（跑空一轮微任务后看标记） */
+async function settled(promise: Promise<void>): Promise<boolean> {
+  let result = false;
+  void promise.then(() => {
+    result = true;
+  });
+  await flush();
+  return result;
 }
 
 describe('streamSse', () => {
@@ -92,18 +103,29 @@ describe('streamSse', () => {
   it('error 帧回调 onError', async () => {
     const { sse, options, done } = startStream();
     sse.push('data: {"error":"上游限流，请稍后再试"}\n\ndata: [DONE]\n\n');
+    sse.close();
     await done;
     expect(options.onError).toHaveBeenCalledWith('上游限流，请稍后再试');
     expect(options.onDone).toHaveBeenCalledTimes(1);
   });
 
-  /** [DONE] 之后立即结束，后面的数据不再读 */
-  it('[DONE] 后 resolve 且不再处理后续数据', async () => {
+  /**
+   * [DONE] 之后不再分发数据，但也不 cancel 流（Chromium 会把主动取消记为 net::ERR_ABORTED）：
+   * 流仍可写入说明没有被取消；直到服务端关闭才 resolve
+   */
+  it('[DONE] 后不处理后续数据、不取消流，读到流结束才 resolve', async () => {
     const { sse, options, done } = startStream();
     sse.push('data: {"delta":"A"}\n\ndata: [DONE]\n\ndata: {"delta":"B"}\n\n');
-    await done;
+    await flush();
     expect(options.onDone).toHaveBeenCalledTimes(1);
     expect(options.onDelta).toHaveBeenCalledTimes(1);
+    expect(await settled(done)).toBe(false);
+    // 被 cancel 的流再 enqueue 会抛 TypeError
+    expect(() => sse.push('data: {"delta":"C"}\n\n')).not.toThrow();
+    await flush();
+    expect(options.onDelta).toHaveBeenCalledTimes(1);
+    sse.close();
+    await done;
   });
 
   /** abort 之后即使流还在推数据也不再回调，promise 正常 resolve */
@@ -131,12 +153,10 @@ describe('streamSse', () => {
       onError: vi.fn(),
       onDone: vi.fn(),
     };
-    await expect(streamSse('http://backend.test/api/x', {}, options)).rejects.toMatchObject({
+    await expect(streamSse('/x', {}, options)).rejects.toMatchObject({
       status: 429,
       detail: '今日额度已用完',
     });
-    await expect(streamSse('http://backend.test/api/x', {}, options)).rejects.toBeInstanceOf(
-      ApiError,
-    );
+    await expect(streamSse('/x', {}, options)).rejects.toBeInstanceOf(ApiError);
   });
 });

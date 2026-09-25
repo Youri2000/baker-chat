@@ -7,7 +7,7 @@
 import { create } from 'zustand';
 import { toastError } from '@/components/toastStore';
 import { CHARACTERS } from '@/constants/characters';
-import { API_BASE, tokenStorage } from '@/lib/http';
+import { ApiError, tokenStorage } from '@/lib/http';
 import { streamSse, takeCompletedLines } from '@/lib/sse';
 import {
   clearContext as apiClearContext,
@@ -33,8 +33,8 @@ export interface StreamingState {
   controller: AbortController;
 }
 
-/** 聊天 store */
-export interface ChatState {
+/** 聊天数据；reset 回到 INITIAL */
+interface ChatData {
   conversations: Conversation[];
   /** 会话 id → 消息；未加载过的会话没有键 */
   messagesByConversation: Record<number, Message[]>;
@@ -44,7 +44,10 @@ export interface ChatState {
   /** 角色名 → 是否折叠，默认全部折叠 */
   collapsedCharacters: Record<string, boolean>;
   streaming: StreamingState | null;
+}
 
+/** 聊天 store */
+export interface ChatState extends ChatData {
   /** 拉取全部会话 */
   loadConversations: () => Promise<void>;
   /** 选中会话并拉取其消息，同时选中所属主卡 */
@@ -65,9 +68,19 @@ export interface ChatState {
   stopGeneration: () => Promise<void>;
   /** 丢弃本地消息缓存（数据管理"清空全部消息"后） */
   forgetMessages: () => void;
-  /** 清空选中与消息缓存并重拉会话（数据管理"删除全部对话"后） */
-  reset: () => Promise<void>;
+  /** 中止进行中的回复流并回到初始状态：退出登录、切换账号、登录过期、删除全部对话后调用 */
+  reset: () => void;
 }
+
+/** 初始状态：没有会话、没有选中、全部折叠、没有回复在进行 */
+const INITIAL: ChatData = {
+  conversations: [],
+  messagesByConversation: {},
+  activeConversationId: null,
+  activeCharacterName: null,
+  collapsedCharacters: Object.fromEntries(CHARACTERS.map((c) => [c.name, true])),
+  streaming: null,
+};
 
 /** 用某会话的消息列表回写它的 last_message（子卡预览） */
 function withLastMessage(
@@ -92,12 +105,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
   }
 
   return {
-    conversations: [],
-    messagesByConversation: {},
-    activeConversationId: null,
-    activeCharacterName: null,
-    collapsedCharacters: Object.fromEntries(CHARACTERS.map((c) => [c.name, true])),
-    streaming: null,
+    ...INITIAL,
 
     loadConversations: async () => {
       try {
@@ -150,6 +158,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
         await apiDeleteConversation(id);
       } catch (err) {
         toastError(err);
+        // 409（该角色只剩一个会话）说明本地列表已落后于服务端，重拉对齐
+        if (err instanceof ApiError && err.status === 409) await get().loadConversations();
         return;
       }
       set((s) => {
@@ -207,13 +217,15 @@ export const useChatStore = create<ChatState>()((set, get) => {
         status: 'completed',
         created_at: new Date().toISOString(),
       };
-      set((s) => ({
-        messagesByConversation: {
-          ...s.messagesByConversation,
-          [conversationId]: [...(s.messagesByConversation[conversationId] ?? []), optimistic],
-        },
-        streaming: { conversationId, bubbles: [], pending: true, controller },
-      }));
+      set((s) => {
+        const messages = [...(s.messagesByConversation[conversationId] ?? []), optimistic];
+        return {
+          messagesByConversation: { ...s.messagesByConversation, [conversationId]: messages },
+          // 子卡预览立即显示刚发出的消息，不等流结束
+          conversations: withLastMessage(s.conversations, conversationId, messages),
+          streaming: { conversationId, bubbles: [], pending: true, controller },
+        };
+      });
 
       /** 追加临时气泡；⚠️ 只通过 set 的最新状态写入，不捕获外层 streaming 对象 */
       const pushBubbles = (lines: string[]) => {
@@ -228,7 +240,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       let carry = '';
       try {
         await streamSse(
-          `${API_BASE}/conversations/${conversationId}/chat`,
+          `/conversations/${conversationId}/chat`,
           { text },
           {
             signal: controller.signal,
@@ -256,15 +268,21 @@ export const useChatStore = create<ChatState>()((set, get) => {
       }
       // 先关掉加载气泡，bubbles 保留到重拉完成
       set((s) => (s.streaming === null ? s : { streaming: { ...s.streaming, pending: false } }));
+      // reset()（退出登录 / 删除全部对话）已中止本次回复并清空 streaming：这段会话不再属于当前状态，不重拉
+      if (get().streaming === null) return;
       // ⚠️ 走到这里服务端一定已落库：[DONE] 在后端 finally 之后才发，stopGeneration 也在 stop 返回后才 abort；
       // 持久化结果与 streaming=null 在同一次 set 里落地，列表不会渲染"临时气泡 + 持久化消息"并存的中间状态
       try {
         const messages = await getMessages(conversationId);
-        set((s) => ({
-          messagesByConversation: { ...s.messagesByConversation, [conversationId]: messages },
-          conversations: withLastMessage(s.conversations, conversationId, messages),
-          streaming: null,
-        }));
+        set((s) =>
+          s.streaming === null
+            ? s
+            : {
+                messagesByConversation: { ...s.messagesByConversation, [conversationId]: messages },
+                conversations: withLastMessage(s.conversations, conversationId, messages),
+                streaming: null,
+              },
+        );
       } catch (err) {
         toastError(err);
         set({ streaming: null });
@@ -290,9 +308,9 @@ export const useChatStore = create<ChatState>()((set, get) => {
 
     forgetMessages: () => set({ messagesByConversation: {} }),
 
-    reset: async () => {
-      set({ activeConversationId: null, activeCharacterName: null, messagesByConversation: {} });
-      await get().loadConversations();
+    reset: () => {
+      get().streaming?.controller.abort();
+      set(INITIAL);
     },
   };
 });

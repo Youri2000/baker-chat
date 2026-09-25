@@ -1,6 +1,7 @@
 /**
  * @file 登录态：token（持久化在 localStorage，由 lib/http 读写）+ user。
  * 提供登录、注册、退出、启动校验；并向 lib/http 注册 401 处理器（清登录态 + 提示）。
+ * 登录态变化（登录、注册、退出、过期）时把 chatStore 与 settingsStore 重置，上一个用户的数据不会留到下一个用户。
  * 路由守卫只看 token：token 为 null 即跳 /login。
  */
 import { create } from 'zustand';
@@ -8,6 +9,7 @@ import { toast } from '@/components/toastStore';
 import { onUnauthorized, tokenStorage } from '@/lib/http';
 import { login as apiLogin, me, register as apiRegister, type User } from '@/features/auth/api';
 import { useChatStore } from '@/features/chat/chatStore';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 
 /** 登录态 store */
 export interface AuthState {
@@ -23,24 +25,30 @@ export interface AuthState {
   bootstrap: () => Promise<void>;
 }
 
+/** ✅ 清掉上一个用户的会话、消息与设置（chatStore.reset 同时中止进行中的回复流）；新用户的数据到达前页面不显示旧数据 */
+function resetUserData(): void {
+  useChatStore.getState().reset();
+  useSettingsStore.getState().reset();
+}
+
 /** 登录态 */
 export const useAuthStore = create<AuthState>()((set) => ({
   token: tokenStorage.get(),
   user: null,
   login: async (username, password) => {
     const { token, user } = await apiLogin(username, password);
+    resetUserData();
     tokenStorage.set(token);
     set({ token, user });
   },
   register: async (username, password) => {
     const { token, user } = await apiRegister(username, password);
+    resetUserData();
     tokenStorage.set(token);
     set({ token, user });
   },
   logout: () => {
-    // 退出时中止进行中的回复流并清掉临时气泡；流结束后的重拉不再带 token，只会得到普通 401
-    useChatStore.getState().streaming?.controller.abort();
-    useChatStore.setState({ streaming: null });
+    resetUserData();
     tokenStorage.clear();
     set({ token: null, user: null });
   },
@@ -54,8 +62,11 @@ export const useAuthStore = create<AuthState>()((set) => ({
   },
 }));
 
-// ⚠️ 401 时 http 层已清掉 localStorage 里的 token，这里同步内存状态并提示；守卫看到 token 为 null 即重定向
+// ⚠️ 401 时 http 层已清掉 localStorage 里的 token，这里同步内存状态并提示；守卫看到 token 为 null 即重定向。
+// 并发的多个 401 只处理一次：第一个已把内存里的 token 置空；退出登录后残留请求的 401 同样不再提示
 onUnauthorized(() => {
+  if (useAuthStore.getState().token === null) return;
+  resetUserData();
   useAuthStore.setState({ token: null, user: null });
   toast('登录已过期，请重新登录');
 });

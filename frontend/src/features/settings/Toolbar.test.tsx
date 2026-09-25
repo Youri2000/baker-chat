@@ -1,5 +1,5 @@
 /**
- * @file 工具栏测试：E 键切换显隐（输入框内 / 带修饰键不触发）、未选主卡点新建弹提示、
+ * @file 工具栏测试：E 键切换显隐（输入框 / 下拉框内、带修饰键不触发）、未选主卡点新建弹只有"确定"的提示框、
  * 已选主卡点新建创建会话并选中、对话管理与设置按钮打开对应对话框。
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -53,32 +53,37 @@ describe('Toolbar', () => {
     expect(toolbarButtons()).toHaveLength(3);
   });
 
-  /** 焦点在 input / textarea 内，或带 Ctrl / Meta / Alt 时不切换 */
-  it('输入框内或带修饰键按 E 不触发', () => {
+  /** 焦点在 input / textarea / select 内（设置里的角色下拉按字母选项），或带 Ctrl / Meta / Alt 时不切换 */
+  it('输入框、下拉框内或带修饰键按 E 不触发', () => {
     render(
       <>
         <input aria-label="field" />
         <textarea aria-label="area" />
+        <select aria-label="pick">
+          <option>a</option>
+        </select>
         <Toolbar />
       </>,
     );
     fireEvent.keyDown(screen.getByLabelText('field'), { key: 'e' });
     fireEvent.keyDown(screen.getByLabelText('area'), { key: 'e' });
+    fireEvent.keyDown(screen.getByLabelText('pick'), { key: 'e' });
     fireEvent.keyDown(document.body, { key: 'e', ctrlKey: true });
     fireEvent.keyDown(document.body, { key: 'e', metaKey: true });
     fireEvent.keyDown(document.body, { key: 'e', altKey: true });
     expect(toolbarButtons()).toHaveLength(3);
   });
 
-  /** 没有选中主卡：弹"请先选中角色卡片"，只有"确定"，不发请求 */
-  it('未选中主卡点新建会话时弹出提示框', async () => {
+  /** 没有选中主卡：弹"请先选中角色卡片"，只有"确定"一个按钮（没有 × 关闭钮），不发请求 */
+  it('未选中主卡点新建会话时弹出只有"确定"的提示框', async () => {
     const fetchMock = mockFetch(() => jsonResponse({}));
     render(<Toolbar />);
     await userEvent.click(screen.getByRole('button', { name: '新建会话' }));
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText('请先选中角色卡片')).toBeInTheDocument();
+    expect(within(dialog).getAllByRole('button')).toHaveLength(1);
     expect(within(dialog).getByRole('button', { name: '确定' })).toBeInTheDocument();
-    expect(within(dialog).queryByRole('button', { name: '取消' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: '关闭' })).not.toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole('button', { name: '确定' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();

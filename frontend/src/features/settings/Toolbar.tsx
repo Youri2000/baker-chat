@@ -20,11 +20,14 @@ const BUTTON_CLASS = 'group fixed z-[100] cursor-pointer p-0';
 const ICON_CLASS =
   'block h-auto opacity-50 group-hover:[filter:brightness(0)_invert(1)_brightness(0.6)]';
 
-/** 焦点在输入框 / textarea / contenteditable 内时按键属于输入，不切换工具栏 */
+/** 焦点在输入框 / textarea / 下拉框 / contenteditable 内时按键属于表单控件（下拉框按字母选项），不切换工具栏 */
 function isEditableTarget(target: EventTarget | null): boolean {
   return (
     target instanceof HTMLElement &&
-    (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+    (target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.tagName === 'SELECT' ||
+      target.isContentEditable)
   );
 }
 
@@ -111,8 +114,8 @@ export function Toolbar() {
         </>
       )}
 
-      {/* "请先选中角色卡片"：原 dialog-shell(ns, 280px, 0)，无标题、文案居中、按钮居中 */}
-      <DialogShell open={dialog === 'needSelect'} onClose={closeDialog} width={280}>
+      {/* "请先选中角色卡片"：原 dialog-shell(ns, 280px, 0)，无标题、文案居中、只有"确定"一个按钮 */}
+      <DialogShell open={dialog === 'needSelect'} onClose={closeDialog} width={280} hideClose>
         <p className="mb-[18px] text-center text-[16px] text-text-primary">请先选中角色卡片</p>
         <DialogButton className="mx-auto block" onClick={closeDialog}>
           确定

@@ -85,22 +85,24 @@ export function ChatInput() {
     document.execCommand('insertText', false, event.clipboardData.getData('text/plain'));
   }
 
-  /** ✅ 在光标处插入表情：光标在输入框内则替换选区，否则追加到末尾；之后光标停在表情后面 */
+  /** ✅ 在光标处插入表情：光标在输入框内则替换选区，否则插到内容末尾；之后光标停在表情后面 */
   function handlePickEmoji(emoji: Emoji) {
     const input = inputRef.current!;
+    const selection = window.getSelection()!;
+    // ⚠️ 先判断选区再 focus()：输入框失焦后 Chrome 的 focus() 会把光标放到开头，此时应把光标移到末尾
+    const outside = !input.contains(selection.anchorNode);
     input.focus();
-    const fragment = document.createRange().createContextualFragment(emojiToHtml(emoji.token));
-    const selection = window.getSelection();
-    if (selection !== null && selection.rangeCount > 0 && input.contains(selection.anchorNode)) {
-      const range = selection.getRangeAt(0);
-      range.deleteContents();
-      range.insertNode(fragment);
-      range.collapse(false);
-      selection.removeAllRanges();
-      selection.addRange(range);
-      return;
+    if (outside) {
+      selection.selectAllChildren(input);
+      selection.collapseToEnd();
     }
-    input.append(fragment);
+    const fragment = document.createRange().createContextualFragment(emojiToHtml(emoji.token));
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    range.insertNode(fragment);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
   }
 
   return (

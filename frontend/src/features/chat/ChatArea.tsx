@@ -36,14 +36,18 @@ export function ChatArea() {
   const myGender = settings?.my_gender ?? 'male';
   const character = conversation === undefined ? null : findCharacter(conversation.character_name);
 
+  // ⚠️ 两个点击处理器从 store 读最新值而不是本次渲染的 settings：连点时上一次的乐观更新已写入 store，
+  // 但本次渲染的闭包还是旧值，按旧值算"下一个"会把同一个值发两次
   /** 点击聊天条：切到下一种样式并保存 */
   function handleCycleStrip() {
-    void updateSettings({ strip_variant: NEXT_STRIP[stripVariant] });
+    const current = useSettingsStore.getState().settings?.strip_variant ?? 0;
+    void updateSettings({ strip_variant: NEXT_STRIP[current] });
   }
 
   /** 点击我方头像：切换管理员性别并保存 */
   function handleToggleGender() {
-    void updateSettings({ my_gender: myGender === 'male' ? 'female' : 'male' });
+    const current = useSettingsStore.getState().settings?.my_gender ?? 'male';
+    void updateSettings({ my_gender: current === 'male' ? 'female' : 'male' });
   }
 
   return (
