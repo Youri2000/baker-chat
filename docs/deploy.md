@@ -76,7 +76,7 @@ Environment Variables 逐项 **Add**：
    - Framework Preset：自动识别为 **Vite**（`frontend/vercel.json` 里也写死了 `"framework": "vite"`）。
    - **Root Directory**：点 **Edit** → 选 `frontend` → 确认。这一步不能漏，否则 Vercel 在仓库根找不到 Vite。
    - Build and Output Settings 保持默认（Build Command `pnpm run build`，即 `tsc -b && vite build`；Output Directory `dist`）。Vercel 读到根目录的 `pnpm-lock.yaml` 与 `packageManager` 字段，会用 pnpm 9 在仓库根安装 workspace 依赖。
-   - **Environment Variables**：Key `VITE_API_BASE_URL`，Value 填第 (b) 步的 Render 域名，**不带尾部斜杠、不含 `/api`**，例如 `https://baker-chat-api.onrender.com`；三个环境（Production / Preview / Development）都勾上。
+   - **Environment Variables**：Key `VITE_API_BASE_URL`，Value 填第 (b) 步的 Render 域名，**不带尾部斜杠、不含 `/api`**，例如 `https://baker-chat-api.onrender.com`；Environments 是单选下拉框，保持默认的 **Production and Preview** 即可（Development 只影响本地 `vercel dev`，用不到）。
 3. 点 **Deploy**，约 1 分钟后拿到域名，形如 `https://baker-chat-xxxx.vercel.app`（项目 Settings → Domains 可看到全部域名，Production 域名通常是 `https://<project>.vercel.app`）。
 4. `VITE_` 变量是**构建期**写进产物的：以后改了 `VITE_API_BASE_URL` 必须到 Deployments 页对最新部署点 **Redeploy**，改环境变量本身不会生效。
 
