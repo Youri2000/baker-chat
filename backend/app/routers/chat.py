@@ -73,6 +73,10 @@ def persist_reply(conversation_id: int, full_text: str, status: str, error: str 
     lines = [line.strip() for line in parts if line.strip()]
     line_status = "completed" if status == "failed" else status
     with SessionLocal() as db:
+        conversation = db.get(Conversation, conversation_id)
+        # 流进行中会话已被删除：回复无处可归，什么也不写
+        if conversation is None:
+            return
         db.add_all(
             Message(conversation_id=conversation_id, side="other", text=line, status=line_status)
             for line in lines
@@ -90,7 +94,7 @@ def persist_reply(conversation_id: int, full_text: str, status: str, error: str 
         memory = full_text if status == "completed" else "\n".join(lines)
         if status != "failed" and memory:
             db.add(ContextEntry(conversation_id=conversation_id, role="assistant", content=memory))
-        db.get(Conversation, conversation_id).updated_at = datetime.now(UTC)
+        conversation.updated_at = datetime.now(UTC)
         db.commit()
 
 
@@ -153,10 +157,13 @@ async def stream_reply(
     finally:
         # 💡 同步写库放在 finally：取消只发生在 await 处，同步代码不会被打断
         # 详见 docs/interview.md#sse-persist
-        persist_reply(conversation_id, full_text, status, error)
-        if active_streams.get(conversation_id) is stream:
-            del active_streams[conversation_id]
-        stream.finished.set()  # 等在 /chat/stop 上的请求此刻才返回
+        try:
+            persist_reply(conversation_id, full_text, status, error)
+        finally:
+            # 落库失败也必须注销并放行 /chat/stop，否则登记表泄漏、stop 永远挂起
+            if active_streams.get(conversation_id) is stream:
+                del active_streams[conversation_id]
+            stream.finished.set()  # 等在 /chat/stop 上的请求此刻才返回
     yield "data: [DONE]\n\n"
 
 

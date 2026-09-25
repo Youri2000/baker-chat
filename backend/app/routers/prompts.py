@@ -40,13 +40,18 @@ def put_prompt(
             PromptOverride.user_id == user.id, PromptOverride.character_name == character_name
         )
     )
-    is_custom = bool(body.prompt.strip()) and body.prompt != CHARACTER_PROMPTS[character_name]
+    # 与内置值两边都去掉首尾空白再比较：只多了末尾空格不算自定义
+    prompt = body.prompt.strip()
+    is_custom = bool(prompt) and prompt != CHARACTER_PROMPTS[character_name].strip()
     if not is_custom:
+        # 空内容或与内置相同：删除已有覆盖，回退到内置提示词
         if override is not None:
             db.delete(override)
     elif override is not None:
+        # 已有覆盖：原地更新
         override.prompt = body.prompt
     else:
+        # 首次自定义：新建覆盖记录
         db.add(PromptOverride(user_id=user.id, character_name=character_name, prompt=body.prompt))
     db.commit()
     return CharacterPromptOut(

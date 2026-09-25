@@ -34,7 +34,7 @@ def _transport_message(exc: Exception) -> str:
     if isinstance(exc, httpx.TimeoutException):
         return "上游响应超时"
     # 部分异常（如 ReadError）的 str 为空，只留异常类名让用户和日志能看出原因
-    return f"上游请求失败：{exc or type(exc).__name__}"
+    return f"上游请求失败：{str(exc) or type(exc).__name__}"
 
 
 def _client() -> httpx.AsyncClient:

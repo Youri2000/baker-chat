@@ -41,6 +41,25 @@ def test_put_empty_deletes_override(client: TestClient, auth: dict[str, str]) ->
     }
 
 
+def test_put_builtin_with_trailing_whitespace_is_not_custom(
+    client: TestClient, auth: dict[str, str]
+) -> None:
+    """只比内置值多了首尾空白：不算自定义，已有覆盖也被删除。"""
+    padded = CHARACTER_PROMPTS["陈千语"] + "   \n\n"
+    saved = client.put("/api/prompts/陈千语", json={"prompt": padded}, headers=auth).json()
+    assert saved == {
+        "character_name": "陈千语",
+        "prompt": CHARACTER_PROMPTS["陈千语"],
+        "is_custom": False,
+    }
+
+    client.put("/api/prompts/陈千语", json={"prompt": "自定义"}, headers=auth)
+    reset = client.put("/api/prompts/陈千语", json={"prompt": "  " + padded}, headers=auth).json()
+    assert reset["is_custom"] is False
+    listed = {p["character_name"]: p for p in client.get("/api/prompts", headers=auth).json()}
+    assert listed["陈千语"]["is_custom"] is False
+
+
 def test_put_unknown_character_404(client: TestClient, auth: dict[str, str]) -> None:
     """不存在的角色返回 404。"""
     assert client.put("/api/prompts/路人", json={"prompt": "x"}, headers=auth).status_code == 404

@@ -186,6 +186,7 @@ def test_upstream_http_error_becomes_error_frame(
         (httpx.ReadTimeout("read timed out"), "上游响应超时"),
         (httpx.ConnectTimeout("connect timed out"), "上游响应超时"),
         (httpx.ConnectError("boom"), "上游请求失败：boom"),
+        (httpx.ReadError(""), "上游请求失败：ReadError"),  # str 为空时回落到异常类名
     ],
 )
 def test_upstream_transport_error_becomes_error_frame(
@@ -335,6 +336,30 @@ def test_stop_other_users_conversation_404(client: TestClient, auth: dict[str, s
         assert client.post(f"/api/conversations/{conversation_id}/chat/stop").status_code == 401
     finally:
         del active_streams[conversation_id]
+
+
+def test_conversation_deleted_mid_stream_ends_cleanly(
+    client: TestClient, auth: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """流进行中会话被删除：不抛异常、仍以 [DONE] 收尾、登记表清空，且不写任何回复。"""
+    monkeypatch.setattr(settings, "ai_mock", True)
+    created = client.post("/api/conversations", json={"character_name": "梨诺"}, headers=auth)
+    conversation_id = created.json()["id"]  # 该角色已有 2 段会话，删除这段不会 409
+
+    async def drive() -> list[str]:
+        generator = stream_reply(conversation_id, CHAT_MESSAGES, 0.8, 100)
+        frames = [await anext(generator)]
+        deleted = client.delete(f"/api/conversations/{conversation_id}", headers=auth)
+        assert deleted.status_code == 204
+        async for frame in generator:
+            frames.append(frame)
+        return frames
+
+    frames = asyncio.run(drive())
+    assert frames[-1] == "data: [DONE]\n\n"
+    assert active_streams == {}
+    assert message_rows(conversation_id) == []
+    assert context_rows(conversation_id) == []
 
 
 def test_task_cancellation_persists_as_aborted(

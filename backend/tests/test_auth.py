@@ -95,6 +95,28 @@ def test_login_success_and_failure(client: TestClient) -> None:
         assert response.json()["detail"] == "用户名或密码错误"
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"username": "demo", "password": "12345"},  # 密码短于注册规则的 6 位
+        {"username": "ab", "password": "secret123"},  # 用户名短于注册规则的 3 位
+        {"username": "a-b-c", "password": "x" * 65},  # 用户名含非法字符、密码超长
+    ],
+)
+def test_login_does_not_validate_format(client: TestClient, payload: dict[str, str]) -> None:
+    """登录不套用注册的格式校验：格式不合规的凭据同样是 401，而不是 422 校验数组。"""
+    register(client, "demo")
+    response = client.post("/api/auth/login", json=payload)
+    assert response.status_code == 401
+    assert response.json()["detail"] == "用户名或密码错误"
+
+
+def test_login_empty_credentials_422(client: TestClient) -> None:
+    """登录只要求两个字段非空：空串或缺失才是 422。"""
+    assert client.post("/api/auth/login", json={"username": "", "password": "x"}).status_code == 422
+    assert client.post("/api/auth/login", json={"username": "demo"}).status_code == 422
+
+
 def test_me_requires_valid_token(client: TestClient, auth: dict[str, str]) -> None:
     """有效 token 返回用户；缺失、伪造、过期 token 一律 401。"""
     assert client.get("/api/auth/me", headers=auth).json()["username"] == "alice"

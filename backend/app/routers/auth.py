@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.characters import CHARACTER_NAMES
 from app.deps import DbDep, UserDep
 from app.models import Conversation, User, UserSettings
-from app.schemas import AuthRequest, AuthResponse, UserOut
+from app.schemas import AuthRequest, AuthResponse, LoginRequest, UserOut
 from app.security import create_token, hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -34,8 +34,8 @@ def register(body: AuthRequest, db: DbDep) -> AuthResponse:
 
 
 @router.post("/login")
-def login(body: AuthRequest, db: DbDep) -> AuthResponse:
-    """登录；用户不存在与密码错误返回同一个 401，不区分原因。"""
+def login(body: LoginRequest, db: DbDep) -> AuthResponse:
+    """登录；用户不存在、密码错误与格式不合规的凭据都返回同一个 401，不区分原因。"""
     user = db.scalar(select(User).where(User.username == body.username))
     if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(401, "用户名或密码错误")

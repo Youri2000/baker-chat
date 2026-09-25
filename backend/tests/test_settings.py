@@ -40,6 +40,18 @@ def test_patch_partial_update_and_world_reset(client: TestClient, auth: dict[str
     assert reset["my_gender"] == "female"  # 其他字段不受影响
 
 
+def test_patch_blank_world_setting_restores_default(
+    client: TestClient, auth: dict[str, str]
+) -> None:
+    """纯空白的 world_setting 等同于空串：恢复默认，而不是把空白存起来发给 AI。"""
+    client.patch("/api/settings", json={"world_setting": "自定义世界"}, headers=auth)
+    blank = client.patch("/api/settings", json={"world_setting": " \n\t "}, headers=auth).json()
+    assert blank["world_setting"] == DEFAULT_WORLD_SETTING
+    assert blank["world_setting_is_default"] is True
+    again = client.get("/api/settings", headers=auth).json()
+    assert again["world_setting_is_default"] is True
+
+
 @pytest.mark.parametrize(
     "payload",
     [

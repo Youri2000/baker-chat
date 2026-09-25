@@ -1,12 +1,17 @@
 """应用配置：用 pydantic-settings 从环境变量 / .env 读取，导出全局单例 settings 供各模块引用。"""
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 固定读取 backend/.env：相对路径依赖启动目录，从仓库根目录启动时会静默忽略
+ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 
 class Settings(BaseSettings):
     """后端运行配置，字段与 docs/api.md 第 7 节的环境变量一一对应。"""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, env_file_encoding="utf-8")
 
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"

@@ -9,7 +9,7 @@ from app.characters import CHARACTER_NAMES
 
 
 class AuthRequest(BaseModel):
-    """注册与登录共用的请求体。
+    """注册请求体，带完整的用户名 / 密码格式校验。
 
     密码 6–64 个字符、不限字符集；bcrypt 只接受 72 字节，UTF-8 编码超出时在这里拒绝而不是静默截断。
     """
@@ -24,6 +24,16 @@ class AuthRequest(BaseModel):
         if len(value.encode()) > 72:
             raise ValueError("密码为 6–64 位；含中文时最多 24 个字")
         return value
+
+
+class LoginRequest(BaseModel):
+    """登录请求体：只要求非空，不做格式校验。
+
+    格式不合规的凭据必然匹配不到用户，交给路由统一返回 401，而不是暴露 422 校验数组。
+    """
+
+    username: str = Field(min_length=1)
+    password: str = Field(min_length=1)
 
 
 class UserOut(BaseModel):
@@ -122,6 +132,14 @@ class SettingsPatch(BaseModel):
     world_setting: str | None = None
     my_gender: Literal["male", "female"] | None = None
     strip_variant: Literal[0, 1, 2] | None = None
+
+    @field_validator("world_setting")
+    @classmethod
+    def blank_means_default(cls, value: str | None) -> str | None:
+        """纯空白视为恢复默认：存空串，否则发给 AI 的世界观就是一段空白。"""
+        if value is not None and not value.strip():
+            return ""
+        return value
 
 
 class CharacterPromptOut(BaseModel):
