@@ -181,6 +181,7 @@ pnpm e2e
 
 # 仓库根：一次跑前端 + e2e 的 lint / typecheck
 pnpm lint && pnpm typecheck
+pnpm check:docs                    # 源码 💡 注释指向的 docs/interview.md 锚点、文档链接与反引号路径是否存在
 
 # 度量脚本（docs/interview.md 第 4 节有数据与复现步骤）
 node scripts/measure/bundle-size.mjs
