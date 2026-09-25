@@ -196,11 +196,11 @@ AI_MOCK=1 试跑：60 条 35.5 s，全部记为 `-`（mock 流没有 usage 帧�
 - `#bundle-size`：提示词移到后端 + 去依赖 + 子集化的产物对比（第 4 节；`characters.py` 的 `#prompts-backend` 可引用同一表）。
 - `#first-bubble`、`#prompt-tokens`：两份等真实 Key 的数据，脚本与复现命令在第 5 节。
 
-## 6. 真实 DeepSeek 数据（2026-09-24，主会话补测）
+## 7. 真实 DeepSeek 数据（2026-09-24，主会话补测）
 
 后端配真实 Key（`deepseek-flash`，`https://api.deepseek.com`），前端 `pnpm build` 后 `vite preview` 在 5182，后端 8030，临时 SQLite，本机网络直连（不走代理）。
 
-### 6.1 发现：V4 系列默认开启思考模式，流式分段失效
+### 7.1 发现：V4 系列默认开启思考模式，流式分段失效
 
 **现象**：第一次跑 `first-bubble.mjs`（后端尚未关闭思考），5 轮首个气泡 5756 / 4926 / 1407 / 5017 / 5029 ms，全文完成 5757 / 4926 / 1407 / 5017 / 5030 ms——首个气泡和全文几乎同时出现，中位数都是 5017 ms，"流式按行"对首句毫无提升。
 
@@ -218,7 +218,7 @@ AI_MOCK=1 试跑：60 条 35.5 s，全部记为 `-`（mock 流没有 usage 帧�
 
 **验证**：见 6.2；直连上游对比：首个正文 1945 ms → 765 ms，completion token 300 → 46。
 
-### 6.2 首个 AI 气泡出现时间（关闭思考后）
+### 7.2 首个 AI 气泡出现时间（关闭思考后）
 
 `node scripts/measure/first-bubble.mjs --base http://localhost:5182 --api http://localhost:8030 --user demo --password demo123 --character 陈千语 --prompt "你好，简单介绍一下你自己吧，分三句话说，每句话单独一行。" --runs 5`
 
@@ -236,7 +236,7 @@ AI_MOCK=1 试跑：60 条 35.5 s，全部记为 `-`（mock 流没有 usage 帧�
 - 首个数据块 531 ms 到首个气泡 751 ms 之间的 220 ms，是等第一行写完（第一个 `\n`）的时间。
 - 脚本首版还想用 CDP 的 `loadingFinished` 记录响应结束时刻，但多数轮次收不到该事件（前端处理完 `[DONE]` 后释放了流），已删掉这一列，只保留"首个数据块"；修正后重跑一次：首个数据块 583 ms、首个气泡 718 ms、全文 1006 ms，与上表一致。
 
-### 6.3 prompt_tokens 曲线与前缀缓存命中（60 条连续消息）
+### 7.3 prompt_tokens 曲线与前缀缓存命中（60 条连续消息）
 
 `python3 scripts/measure/prompt-tokens.py --api http://localhost:8030 --user demo --password demo123 --character 陈千语 --count 60`
 
@@ -251,4 +251,4 @@ AI_MOCK=1 试跑：60 条 35.5 s，全部记为 `-`（mock 流没有 usage 帧�
 
 - 第 1–20 条每条约 +38 token 线性增长；第 21 条起 40 条窗口填满，之后在 5700 上下波动（窗口滑动，旧消息被新消息替换）。按线性外推，不截断时第 60 条约 4894 + 59 × 38 ≈ 7100 token，截断后 5704（−20%），差距随会话继续拉大。
 - 基线 4894 token 里绝大部分是两条 system（固定规则 + 世界观 + 角色提示词）；DeepSeek 按 128 token 块统计前缀缓存命中，第 1–20 条命中随会话增长（4736 → 5504）；窗口开始滑动后，每轮最前面的对话被丢弃、前缀改变，命中回落到 4864 并保持——system 部分一直命中缓存，只有对话部分需要按未命中价计费。
-- 关闭思考前的同一曲线（首次测量）：4919 → 5227（#10）→ 5524（#20）→ 5597（#40）→ 5649（#60），形状一致；当时第 11 条遇到一次空原因的上游错误 `上游请求失败：`，已把异常类名补进原因文案（`backend/app/ai.py::_transport_message`）。
+- 关闭思考前的同一曲线（首次测量）：4919 → 5227（#10）→ 5524（#20）→ 5597（#40）→ 5649（#60），形状一致；当时第 11 条遇到一次空原因的上游错误 `上游请求失败：`。`backend/app/ai.py` `_transport_message` 首版补的回落写成 `{exc or type(exc).__name__}`，异常对象恒为真值、回落永远走不到（整理讲稿时直接调用 `_transport_message(httpx.ReadError(""))` 复核发现）；缺陷修复轮改为 `str(exc) or type(exc).__name__`，并给 `test_upstream_transport_error_becomes_error_frame` 加了 `ReadError("") → 上游请求失败：ReadError` 的参数化用例。

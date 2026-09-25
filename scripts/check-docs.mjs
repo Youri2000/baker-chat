@@ -1,6 +1,7 @@
 /**
  * @file 文档检查（`pnpm check:docs`）：核对源码注释里的 `docs/interview.md#<slug>` 锚点在文档中有对应标题，
  * 以及 README.md、docs/*.md、docs/notes/*.md 里的相对链接与反引号包住的仓库内路径真实存在。
+ * 源码包括 `.husky/` 下无扩展名的钩子脚本（husky 自带的 `_/` 目录除外）。
  * 只用 Node 内置模块，只读；发现问题时逐条打印 `文件:行号  说明` 并以退出码 1 结束。
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -92,14 +93,14 @@ function headingIds(lines) {
   return ids;
 }
 
-/** 递归列出源码文件（仓库相对路径） */
+/** 递归列出源码文件（仓库相对路径）；`.husky/` 直接子文件没有扩展名，也算源码 */
 function sourceFiles(dir = ROOT, out = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const abs = path.join(dir, entry.name);
     const rel = path.relative(ROOT, abs);
     if (entry.isDirectory()) {
       if (!SKIP_DIRS.has(entry.name) && rel !== 'docs/comet') sourceFiles(abs, out);
-    } else if (SOURCE_EXTS.has(path.extname(entry.name))) {
+    } else if (SOURCE_EXTS.has(path.extname(entry.name)) || path.dirname(rel) === '.husky') {
       out.push(rel);
     }
   }
