@@ -22,7 +22,7 @@ services:
       - key: DEEPSEEK_MODEL
         value: deepseek-flash
       - key: CORS_ORIGINS
-        value: https://baker-chat.vercel.app
+        value: https://baker-chat-frontend.vercel.app
       - key: DAILY_MESSAGE_LIMIT
         value: '100'
       - key: DEMO_USERNAME

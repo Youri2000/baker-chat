@@ -201,7 +201,11 @@ node scripts/measure/bundle-size.mjs
 
 ## 线上地址
 
-部署后填写（前端 Vercel 地址、后端 Render 地址）。部署步骤见 [docs/deploy.md](docs/deploy.md)：Neon 建库 → Render Blueprint 读取 `render.yaml` → Vercel 导入 `frontend` → 回填 `CORS_ORIGINS` → 线上验收清单。
+- 前端（Vercel）：<https://baker-chat-frontend.vercel.app>
+- 后端（Render）：<https://baker-chat-api.onrender.com>（健康检查 `/health`）
+- 数据库：Neon Postgres（Singapore）
+
+Render 免费实例 15 分钟无流量会休眠，第一次打开要等 30–60 秒唤醒；演示前先访问一次 `/health`。部署步骤见 [docs/deploy.md](docs/deploy.md)：Neon 建库 → Render Blueprint 读取 `render.yaml` → Vercel 导入 `frontend` → 回填 `CORS_ORIGINS` → 线上验收清单。
 
 ## 演示账号
 

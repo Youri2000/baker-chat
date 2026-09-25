@@ -587,7 +587,7 @@ flowchart LR
 - **bcrypt 默认 12 轮约 169 ms**：注册 / 登录接口延迟主要在这里，是有意的安全成本。
 - **Starlette 1.7 把基于 httpx 的 `TestClient` 标为 deprecated**（提示装 `httpx2`），目前只是告警。
 - **注释规范的覆盖**：源码里指向本文的 20 处锚点（`pnpm check:docs` 统计并核对标题存在，扫描范围含 `.husky/` 下无扩展名的钩子）覆盖第 3 节全部 18 个亮点（`git-hooks` 的 `💡` 在 `.husky/pre-commit` 里）与第 4 节的 `font-subset`；第 4 节其余五项（`rerender-memo`、`bundle-size`、`render-count`、`first-bubble`、`prompt-tokens`）是度量结论，源码里没有对应的取舍点，不设 `💡`。
-- **文档层面**：`docs/notes/chat.md` §1 / §2.3 / §4 与 `docs/notes/settings.md` §4 中关于"中断后不重拉""外壳差异""标签卸载""免责声明未改"的描述已被集成阶段替换，`docs/notes/frontend-foundation.md` 的选型表仍记着"按请求是否带 token 区分两种 401"的旧方案（缺陷修复轮已改为按接口路径，见 5.17），原文保留作为过程记录；README 的 4 张截图已在 `docs/screenshots/`（本地 `AI_MOCK=1` 下 Playwright 1920×1080 截取），线上地址待部署后补。
+- **文档层面**：`docs/notes/chat.md` §1 / §2.3 / §4 与 `docs/notes/settings.md` §4 中关于"中断后不重拉""外壳差异""标签卸载""免责声明未改"的描述已被集成阶段替换，`docs/notes/frontend-foundation.md` 的选型表仍记着"按请求是否带 token 区分两种 401"的旧方案（缺陷修复轮已改为按接口路径，见 5.17），原文保留作为过程记录；README 的 4 张截图已在 `docs/screenshots/`（本地 `AI_MOCK=1` 下 Playwright 1920×1080 截取），线上地址已部署并写入 README（前端 https://baker-chat-frontend.vercel.app，后端 https://baker-chat-api.onrender.com，Neon Postgres），线上冒烟：演示账号登录 → 29 张主卡 → 真实 DeepSeek 回复逐行出现 → 刷新后消息仍在 → 连接测试"连接成功"，浏览器 console 与网络无错误。
 
 ## 7. 面试问答速查
 
