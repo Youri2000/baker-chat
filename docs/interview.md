@@ -1,6 +1,6 @@
 # Baker Chat 面试讲稿
 
-"注释中简要说，文档里细致讲"：源码里的 `💡` 注释只点明结论并指向本文的锚点（第 3、4 节的标题就是锚点 id），细节、数据与取舍都写在这里。所有数字来自 `docs/notes/*.md` 记录的实测（2026-09-24，macOS / Apple Silicon，Node 22.22、Python 3.13.5；滚动、按需加载与长会话的数据为 2026-09-28，见 `docs/notes/measurements.md` 第 10 节），例外有三类：第 4 节 prompt-tokens 里明确标注为线性外推的"不截断约 7100"；选型表与亮点里标明"调研探针""调研实测"的数字（如 `content-visibility` 对照、60 条时约 125 px）以及第 5 节排错记录里的调试观测值，来自当时的一次性探针，没有单独归档；依赖体积（`@tanstack/react-virtual` 约 7.9 kB、react-virtuoso 约 20.2 kB，gzip，1000 进制）见 `docs/comet/changes/chat-scroll-perf-hooks/brief.md`；用例数与代码行数以 2026-09-28 的本机实跑为准。代码位置一律写"文件 + 函数名 / 标识符"，不写行号。
+"注释中简要说，文档里细致讲"：源码里的 `💡` 注释只点明结论并指向本文的锚点（第 3、4 节的标题就是锚点 id），细节、数据与取舍都写在这里。所有数字来自 `docs/notes/*.md` 记录的实测（2026-09-24，macOS / Apple Silicon，Node 22.22、Python 3.13.5；滚动、按需加载与长会话的数据为 2026-09-28，见 `docs/notes/measurements.md` 第 10 节），例外有三类：第 4 节 prompt-tokens 里明确标注为线性外推的"不截断约 7100"；选型表与亮点里标明"调研探针""调研实测"的数字（如 `content-visibility` 对照、60 条时约 125 px）以及第 5 节排错记录里的调试观测值，来自当时的一次性探针，没有单独归档；依赖体积（`@tanstack/react-virtual` 约 7.9 kB、react-virtuoso 约 20.2 kB，gzip，1000 进制）见 `docs/comet/archive/2026-09-28-chat-scroll-perf-hooks/brief.md`；用例数与代码行数以 2026-09-28 的本机实跑为准。代码位置一律写"文件 + 函数名 / 标识符"，不写行号。
 
 ## 1. 项目概览
 
