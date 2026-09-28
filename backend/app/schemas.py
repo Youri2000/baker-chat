@@ -95,6 +95,13 @@ class MessageOut(BaseModel):
     created_at: datetime
 
 
+class MessagePage(BaseModel):
+    """消息分页结果：items 按 id 升序，has_more 表示第一条之前是否还有更早的消息。"""
+
+    items: list[MessageOut]
+    has_more: bool
+
+
 class ChatRequest(BaseModel):
     """发送消息请求体；文本去掉首尾空白后不能为空。"""
 

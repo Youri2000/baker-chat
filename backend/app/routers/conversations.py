@@ -1,12 +1,14 @@
-"""会话与消息路由：列表、新建、删除、消息列表、清空消息、清空上下文；全部按当前用户过滤。"""
+"""会话与消息路由：列表、新建、删除、消息分页、清空消息、清空上下文；全部按当前用户过滤。"""
 
-from fastapi import APIRouter, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import delete, func, select
 
 from app.characters import CHARACTER_NAMES
 from app.deps import ConversationDep, DbDep, UserDep
 from app.models import ContextEntry, Conversation, Message
-from app.schemas import ConversationCreate, ConversationOut, LastMessage, MessageOut
+from app.schemas import ConversationCreate, ConversationOut, LastMessage, MessageOut, MessagePage
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -73,12 +75,22 @@ def delete_conversation(conversation: ConversationDep, db: DbDep) -> None:
 
 
 @router.get("/{conversation_id}/messages")
-def list_messages(conversation: ConversationDep, db: DbDep) -> list[MessageOut]:
-    """按 id 升序返回会话的可见消息。"""
-    messages = db.scalars(
-        select(Message).where(Message.conversation_id == conversation.id).order_by(Message.id)
-    ).all()
-    return [MessageOut.model_validate(m) for m in messages]
+def list_messages(
+    conversation: ConversationDep,
+    db: DbDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    before_id: int | None = None,
+) -> MessagePage:
+    """按 id 游标分页：取 id 小于 before_id（不传则从最新开始）的最近 limit 条，按 id 升序返回。"""
+    query = select(Message).where(Message.conversation_id == conversation.id)
+    if before_id is not None:
+        query = query.where(Message.id < before_id)
+    # 倒序多取一条：第 limit + 1 条存在就说明更早还有消息，不必再查一次 count
+    newest_first = db.scalars(query.order_by(Message.id.desc()).limit(limit + 1)).all()
+    return MessagePage(
+        items=[MessageOut.model_validate(m) for m in reversed(newest_first[:limit])],
+        has_more=len(newest_first) > limit,
+    )
 
 
 @router.post("/{conversation_id}/messages/clear", status_code=204)
