@@ -48,6 +48,7 @@ const EXTERNAL_ALLOWLIST = [
   'backend/.env',
   'frontend/.env',
   'backend/.venv/',
+  '.venv/',
   'backend/data/',
   'frontend/dist',
   'e2e/.tmp/',
