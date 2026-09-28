@@ -35,17 +35,23 @@ interface SettingsData {
 
 /** 设置 store */
 export interface SettingsState extends SettingsData {
+  /** 拉取当前用户的设置项 */
   loadSettings: () => Promise<void>;
   /** 乐观更新：先把 patch 合入本地，再 PATCH 并用响应替换；失败回滚并 toast（我方头像性别、聊天条样式也走这里） */
   updateSettings: (patch: SettingsPatch) => Promise<void>;
+  /** 拉取 29 个角色的提示词（含是否已自定义） */
   loadPrompts: () => Promise<void>;
   /** 保存单个角色的提示词覆盖并更新列表中的那一条 */
   savePrompt: (characterName: string, prompt: string) => Promise<void>;
+  /** 拉取对话数与消息数统计 */
   loadStats: () => Promise<void>;
   /** 连接测试；请求本身失败也归为 ok:false */
   ping: () => Promise<PingResult>;
+  /** 删除全部对话：成功后重置 chatStore 并重拉会话与统计 */
   deleteAllConversations: () => Promise<void>;
+  /** 清空全部消息：成功后丢弃消息缓存并重拉会话与统计 */
   clearAllMessages: () => Promise<void>;
+  /** 清空全部会话的 AI 上下文，消息保留 */
   clearAllContext: () => Promise<void>;
   /** 回到初始状态：退出登录、切换账号、登录过期后调用 */
   reset: () => void;

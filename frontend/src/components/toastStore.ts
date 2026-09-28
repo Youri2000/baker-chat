@@ -19,7 +19,9 @@ let nextId = 1;
 /** 提示队列 store */
 interface ToastState {
   toasts: ToastItem[];
+  /** 入队一条提示，TOAST_MS 后自动出队 */
   show: (message: string) => void;
+  /** 立即移除指定提示 */
   dismiss: (id: number) => void;
 }
 

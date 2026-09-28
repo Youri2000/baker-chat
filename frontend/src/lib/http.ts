@@ -15,9 +15,11 @@ export const tokenStorage = {
   get(): string | null {
     return localStorage.getItem(TOKEN_KEY);
   },
+  /** 登录或注册成功后保存 token */
   set(token: string): void {
     localStorage.setItem(TOKEN_KEY, token);
   },
+  /** 退出登录或 401 时清除 token */
   clear(): void {
     localStorage.removeItem(TOKEN_KEY);
   },
@@ -28,6 +30,7 @@ export class ApiError extends Error {
   readonly status: number;
   readonly detail: string;
 
+  /** 用 HTTP 状态码和后端 detail 构造；message 同 detail */
   constructor(status: number, detail: string) {
     super(detail);
     this.name = 'ApiError';
