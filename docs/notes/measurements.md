@@ -1,6 +1,6 @@
 # 可量化的优化与度量（measurements）
 
-记录字体子集化、流式重渲染次数、产物体积对比三项实测数据，以及两个要等真实 DeepSeek Key 才能出数据的脚本（首个气泡时间、prompt_tokens 曲线）的写法与 AI_MOCK=1 试跑记录。脚本在 `scripts/measure/`，度量用例在 `frontend/src/features/chat/rerender.measure.test.tsx`。日期 2026-09-24。
+记录字体子集化、流式重渲染次数、产物体积对比三项实测数据，以及两个要等真实 DeepSeek Key 才能出数据的脚本（首个气泡时间、prompt_tokens 曲线）的写法与 AI_MOCK=1 试跑记录。脚本在 `scripts/measure/`，度量用例在 `frontend/src/features/chat/rerender.measure.test.tsx`。日期 2026-09-24；第 10 节（聊天区滚动、按需加载与长会话的前后对比）与第 3 节末的重测为 2026-09-28。
 
 测量环境：macOS（Apple Silicon）、Node 22.22.2、pnpm 9.12.0、Python 3.13.5、fonttools 4.66.0 + brotli 1.2.0（scratch 目录临时 venv）、Playwright 1.62.1（e2e 工作区）+ 其自带 Chromium 151.0.7922.34（缓存 revision 1234）、后端 `AI_MOCK=1` 跑在 8022、前端 `vite preview` 跑在 5182。
 
@@ -59,7 +59,7 @@ python3 -m venv /tmp/fontenv && /tmp/fontenv/bin/pip install fonttools brotli
 
 ## 3. 流式过程中的重渲染次数
 
-用例：`frontend/src/features/chat/rerender.measure.test.tsx`，随 `pnpm test` 运行；断言只有"挂载渲染 = 20"与"memo 版 ≤ 对照版"，数字打印到 stdout（`pnpm exec vitest run src/features/chat/rerender.measure.test.tsx --reporter=verbose` 可见）。
+用例：`frontend/src/features/chat/rerender.measure.test.tsx`，随 `pnpm test` 运行；断言"挂载渲染 ≤ 20"与"memo 版的渲染次数、提交次数 ≤ 对照版"（挂载一项原为"= 20"，虚拟化后放宽，见本节末），数字打印到 stdout（`pnpm exec vitest run src/features/chat/rerender.measure.test.tsx --reporter=verbose` 可见）。
 
 场景：`<Profiler>` 包住 `<ChatArea>`，20 条历史消息（我方 / 对方交替）→ `chatStore.sendMessage` 走真实的 fetch + `streamSse` 路径 → 推 30 帧 delta（10 行，每行切 3 段，第 3 段带 `\n`，所以每 3 帧固化一个气泡）→ `[DONE]` → 放行重拉请求。`ChatBubble` 用 `vi.mock` 换成计数包装：memo 版 = `memo(Counted)`，对照版 = `Counted`，`Counted` 内部都调用原组件函数（`memo(fn)` 对象的 `.type`）。
 
@@ -73,15 +73,17 @@ python3 -m venv /tmp/fontenv && /tmp/fontenv/bin/pip install fonttools brotli
 
 桩说明：
 
-- `ResizeObserver` 桩不回调（jsdom 没有布局），气泡始终按加载尺寸绘制。真实浏览器里每个新气泡首帧后会收到一次测量回调并 `setInner`，自身多渲染 1 次，两组各 +11，比例不变。
+- `ResizeObserver` 桩不回调（jsdom 没有布局），气泡始终按加载尺寸绘制。真实浏览器里每个新气泡首帧后会收到一次测量回调并 `setInner`，自身多渲染 1 次，两组各 +11，比例不变（引入虚拟列表前的推算）。
 - `requestAnimationFrame` 桩为空，`LoadingBubble` 的 clip-path 展开（双 rAF 后 `setExpanded`）不触发；真实浏览器里它是加载气泡子树的 1 次额外提交，与气泡渲染次数无关，桩掉是为了 commit 数在 CI 里稳定。
 - 测试不套 `StrictMode`；`main.tsx` 的 `StrictMode` 只在开发模式让渲染函数双调，生产构建与此表一致。
 
 复现：`cd frontend && pnpm exec vitest run src/features/chat/rerender.measure.test.tsx --reporter=verbose`（0.13 s）。
 
+**引入虚拟列表后（2026-09-28 重测）**：Profiler commit 26 次（两组相同）；ChatBubble 渲染 memo 版挂载 7 + 发送 → 重拉完成 12，对照版挂载 14 + 146。挂载的第一次提交只渲染末尾附近的行，所以挂载数小于 20；提交次数增加来自虚拟列表的测量回调（新行挂载后被测量，测量结果变化让列表再提交一次），逐项来源未单独拆分；对照版减少是因为每次提交只重跑已渲染的行。测试环境让 `offsetHeight` 返回内联 style 的高度（`src/test/setup.ts`），否则 jsdom 里虚拟列表一行都不渲染；用例断言相应放宽为"挂载渲染 ≤ 20"。
+
 ## 4. 产物体积对比
 
-`node scripts/measure/bundle-size.mjs`（默认比较 `endfield-baker-chat/dist` 与 `frontend/dist`，先 `pnpm build`）。KB 为 1024 进制。
+`node scripts/measure/bundle-size.mjs`（默认比较 `endfield-baker-chat/dist` 与 `frontend/dist`，先 `pnpm build`）。KB 为 1024 进制。下表是 2026-09-24（提交 5fcec89）的数据；之后到按需加载改动前还有几次前端提交，按需加载改动前后的同口径对比见 10.3。
 
 | 类别 | Vue 版原始           | Vue 版 gzip | React 版原始         | React 版 gzip | 原始差值             |
 | ---- | -------------------- | ----------- | -------------------- | ------------- | -------------------- |
@@ -195,6 +197,7 @@ AI_MOCK=1 试跑：60 条 35.5 s，全部记为 `-`（mock 流没有 usage 帧�
 - `#rerender-memo`：`memo(ChatBubble)` + 下标 key 的重渲染数据（第 3 节；`ChatBubble.tsx` 现有注释可补锚点）。
 - `#bundle-size`：提示词移到后端 + 去依赖 + 子集化的产物对比（第 4 节；`characters.py` 的 `#prompts-backend` 可引用同一表）。
 - `#first-bubble`、`#prompt-tokens`：两份等真实 Key 的数据，脚本与复现命令在第 5 节。
+- `#entry-chunk`、`#long-list`：第 10 节的首屏按需加载与长会话数据；对应的技术亮点 `#lazy-preload`、`#virtual-list`、`#auto-scroll` 已由 `lazyWithPreload.tsx`、`MessageList.tsx`、`useChatAutoScroll.ts` 的 💡 注释指向。
 
 ## 9. 真实 DeepSeek 数据（2026-09-24，主会话补测）
 
@@ -252,3 +255,120 @@ AI_MOCK=1 试跑：60 条 35.5 s，全部记为 `-`（mock 流没有 usage 帧�
 - 第 1–20 条每条约 +38 token 线性增长；第 21 条起 40 条窗口填满，之后在 5700 上下波动（窗口滑动，旧消息被新消息替换）。按线性外推，不截断时第 60 条约 4894 + 59 × 38 ≈ 7100 token，截断后 5704（−20%），差距随会话继续拉大。
 - 基线 4894 token 里绝大部分是两条 system（固定规则 + 世界观 + 角色提示词）；DeepSeek 按 128 token 块统计前缀缓存命中，第 1–20 条命中随会话增长（4736 → 5504）；窗口开始滑动后，每轮最前面的对话被丢弃、前缀改变，命中回落到 4864 并保持——system 部分一直命中缓存，只有对话部分需要按未命中价计费。
 - 关闭思考前的同一曲线（首次测量）：4919 → 5227（#10）→ 5524（#20）→ 5597（#40）→ 5649（#60），形状一致；当时第 11 条遇到一次空原因的上游错误 `上游请求失败：`。`backend/app/ai.py` `_transport_message` 首版补的回落写成 `{exc or type(exc).__name__}`，异常对象恒为真值、回落永远走不到（整理讲稿时直接调用 `_transport_message(httpx.ReadError(""))` 复核发现）；缺陷修复轮改为 `str(exc) or type(exc).__name__`，并给 `test_upstream_transport_error_becomes_error_frame` 加了 `ReadError("") → 上游请求失败：ReadError` 的参数化用例。
+
+## 10. 聊天区滚动、按需加载与长会话（2026-09-28，change chat-scroll-perf-hooks）
+
+脚本：`scripts/measure/seed-messages.py`（用后端自己的模型写入确定性的长会话）与 `scripts/measure/chat-perf.mjs`（Playwright + CDP：会话矩阵与 `--lazy` 首屏两种模式），用法写在两个脚本的文件头注释里。改动前后用同一脚本、同一份种子、同一台机器：
+
+- 改动前：`git archive HEAD frontend backend e2e` 导出到临时目录（HEAD 6f2055b），`node_modules` 软链到仓库，后端 8781、`vite preview` 5781。
+- 改动后：当前工作区构建到临时目录，后端 8791、`vite preview` 5791。两边都是临时 SQLite、`AI_MOCK=1`、`DAILY_MESSAGE_LIMIT=1000`。
+- 机器与浏览器：Apple M4 Pro（14 核）、macOS 15.5、Node 22.22.2、Playwright 1.62.1 自带 Chromium 151.0.7922.34（headless，rAF 按 120 Hz 即 8.33 ms 一帧）、视口 1920×1080（画布 zoom = 1）。测量期间同一台机器上还有其他构建与测试在跑（改动前一轮负载均值约 4，改动后一轮约 6）。每组 5 次的打开耗时逐次列在表里，其余指标只列中位数；度量脚本输出的原始 JSON 没有入库。
+- "KB" 为 1024 B；入口 JS 的 kB 取 `vite build` 报告（1000 B）。
+
+### 10.1 种子数据
+
+| 角色 | 会话 id | 条数 | 我方 | 含表情 | 含换行 | 平均字符 |
+| ---- | ------- | ---- | ---- | ------ | ------ | -------- |
+| 诀   | 2       | 100  | 37   | 14     | 16     | 45.1     |
+| 卡缪 | 3       | 500  | 190  | 95     | 58     | 47.1     |
+| 弭弗 | 4       | 2000 | 758  | 384    | 205    | 44.5     |
+
+改动后一轮在最终构建上测量，测量前清掉视觉核查时发过消息的会话并重新写入种子，三段会话的条数、表情与换行比例与上表一致。
+
+### 10.2 长会话：打开 / DOM / 滚动
+
+打开耗时 = 先打开一段空会话（梨诺）让消息区挂载，再点击目标子卡，直到最后一个气泡的文字等于会话最后一条消息、可见、气泡盖住文字、滚动容器贴底（≤ 2 px），再等一帧；4× 时先设降速再点击。"打开时消息 JSON"是 CDP 取到的响应体字节。元素数在加载全部历史后统计（分页版反复滚到顶部，直到 1 秒内没有新的消息请求）；DOM 消息行 = 聊天区内非加载气泡的气泡数。滚动 = 回到底部后鼠标停在聊天区中央，每步 `mouse.wheel(0, -300)` 从底滚到顶，全程 rAF 采样帧间隔；验收"聊天区 DOM 减少 90% 以上"用的是"聊天区元素"列（`getElementsByTagName('*')`）。
+
+改动前：
+
+| 条数 | CPU | 打开耗时中位数 | 打开耗时（各次）                       | 打开时消息 JSON | 历史请求 | 页面元素 | 聊天区元素 | DOM 消息行 | 滚动中最多气泡 | 帧 p50 / p95 / max   | >20 / >33 ms 帧 | LoAF 次数 / 最长 | JS 堆   |
+| ---- | --- | -------------- | -------------------------------------- | --------------- | -------- | -------- | ---------- | ---------- | -------------- | -------------------- | --------------- | ---------------- | ------- |
+| 100  | 1×  | 44.7 ms        | 56.7 / 44.7 / 46.2 / 43.1 / 43.3       | 21.5 KB         | 0        | 1438     | 888        | 100        | 100            | 8.3 / 8.8 / 16.6 ms  | 0 / 0           | 0 / 0 ms         | 4.6 MB  |
+| 100  | 4×  | 102.8 ms       | 101.5 / 103.3 / 102.8 / 100.7 / 110.7  | 21.5 KB         | 0        | 1438     | 888        | 100        | 100            | 8.3 / 9.2 / 16.7 ms  | 0 / 0           | 0 / 0 ms         | 4.6 MB  |
+| 500  | 1×  | 83.7 ms        | 115.4 / 80.6 / 83.7 / 90.2 / 82.5      | 109.0 KB        | 0        | 4995     | 4445       | 500        | 500            | 8.3 / 9.1 / 16.7 ms  | 0 / 0           | 0 / 0 ms         | 7 MB    |
+| 500  | 4×  | 308 ms         | 323.6 / 303.8 / 341.3 / 308 / 303.7    | 109.0 KB        | 0        | 4995     | 4445       | 500        | 500            | 8.5 / 25 / 33.2 ms   | 38 / 1          | 0 / 0 ms         | 7 MB    |
+| 2000 | 1×  | 257.7 ms       | 271.6 / 257.7 / 251.8 / 253.4 / 265.9  | 421.3 KB        | 0        | 18481    | 17931      | 2000       | 2000           | 8.4 / 17.1 / 33.2 ms | 58 / 1          | 0 / 0 ms         | 15.9 MB |
+| 2000 | 4×  | 1063.2 ms      | 1001 / 1063.2 / 1050.7 / 1081 / 1135.5 | 421.3 KB        | 0        | 18481    | 17931      | 2000       | 2000           | 25.5 / 91.1 / 133 ms | 1006 / 562      | 295 / 87.8 ms    | 15.7 MB |
+
+改动后：
+
+| 条数 | CPU | 打开耗时中位数 | 打开耗时（各次）                 | 打开时消息 JSON | 历史请求 | 页面元素 | 聊天区元素 | DOM 消息行 | 滚动中最多气泡 | 帧 p50 / p95 / max    | >20 / >33 ms 帧 | LoAF 次数 / 最长 | JS 堆  |
+| ---- | --- | -------------- | -------------------------------- | --------------- | -------- | -------- | ---------- | ---------- | -------------- | --------------------- | --------------- | ---------------- | ------ |
+| 100  | 1×  | 38.8 ms        | 32 / 37 / 38.8 / 44.7 / 43       | 11.0 KB         | 1        | 691      | 137        | 12         | 23             | 8.3 / 8.4 / 25 ms     | 1 / 0           | 0 / 0 ms         | 4.6 MB |
+| 100  | 4×  | 82.8 ms        | 84.9 / 80.3 / 82.8 / 87.2 / 80   | 11.0 KB         | 1        | 691      | 137        | 12         | 23             | 15.7 / 17.6 / 32.7 ms | 2 / 0           | 0 / 0 ms         | 4.6 MB |
+| 500  | 1×  | 36.9 ms        | 35.1 / 38.2 / 32.5 / 36.9 / 39.3 | 11.7 KB         | 9        | 675      | 121        | 12         | 23             | 8.3 / 9.2 / 24.9 ms   | 1 / 0           | 0 / 0 ms         | 4.9 MB |
+| 500  | 4×  | 91.2 ms        | 74.9 / 98.1 / 91.7 / 88.6 / 91.2 | 11.7 KB         | 9        | 675      | 121        | 12         | 23             | 16 / 24.4 / 42.4 ms   | 26 / 3          | 0 / 0 ms         | 4.9 MB |
+| 2000 | 1×  | 38.6 ms        | 38.2 / 38.6 / 33.3 / 43.1 / 49.4 | 11.3 KB         | 39       | 673      | 119        | 12         | 24             | 8.3 / 9.2 / 41.5 ms   | 3 / 1           | 0 / 0 ms         | 5.7 MB |
+| 2000 | 4×  | 80 ms          | 83.9 / 78.8 / 80 / 73.9 / 85     | 11.3 KB         | 39       | 673      | 119        | 12         | 24             | 16.2 / 24 / 50.4 ms   | 87 / 8          | 0 / 0 ms         | 5.7 MB |
+
+结论：4× 降速下打开 2000 条会话 1063.2 → 80 ms（−92.5%），加载全部历史后聊天区元素 17,931 → 119（−99.3%），滚动帧 p95 91.1 → 24 ms（超过 33 ms 的帧 562 → 8，Long Animation Frame 295 → 0），打开时消息 JSON 421.3 → 11.3 KB，JS 堆 15.7 → 5.7 MB。代价：100 条会话在 4× 降速下滚动帧 p50 / p95 从 8.3 / 9.2 升到 15.7 / 17.6 ms（原来 100 行全部已挂载，滚动只是合成；虚拟化后每帧要挂载、测量进入可视区的行；同条件的前一轮为 16 / 25 ms，p95 在几轮之间波动较大）；加载全部 2000 条要向上加载 39 次，加上打开时的 1 次共 40 页（每页 50）。
+
+### 10.3 首屏按需加载
+
+新浏览器上下文、禁用缓存，每项 5 次中位数。"聊天页挂载" = 设置按钮与 29 张主卡都进入 DOM（`MutationObserver`，相对导航开始）。已登录打开 `/` 的做法是新上下文预写 token 后打开，等 networkidle 再点设置。慢速 4G 为 CDP `Network.emulateNetworkConditions`（latency 150 ms、下行 1.6 Mbps、上行 750 Kbps；CORS 预检不受限速，登录本身 bcrypt 约 180 ms，所以"点击登录 → 聊天页挂载"两种网络下相近）。
+
+入口 JS：改动前唯一的 JS 133.41 kB（gzip，Vite 报告）；改动后入口 88.24 kB（−33.9%）、聊天页 chunk 51.68 kB、设置对话框 chunk 5.66 kB。这组数字来自度量用的构建（`VITE_API_BASE_URL` 指向本地 8791 端口，与改动前指向 8781 的构建字符串长度相同）；直接 `pnpm build`（用 `frontend/.env` 的接口地址）报告入口 88.23 kB，差别只来自内联的接口地址。入口 chunk 里不含 `chatStore`、`settingsStore`、SSE 解析、角色列表与设置对话框的代码（在产物里按标识符与文案检索确认）。
+
+产物合计（`node scripts/measure/bundle-size.mjs --old <改动前 dist> --new <改动后 dist>`；改动前为 `git archive` 导出的 HEAD 6f2055b，两边都在 `frontend` 目录用 `frontend/.env` 直接 `vite build`；KB 为 1024 B）：
+
+| 类别 | 改动前原始            | 改动前 gzip | 改动后原始            | 改动后 gzip | 原始差值                                 |
+| ---- | --------------------- | ----------- | --------------------- | ----------- | ---------------------------------------- |
+| JS   | 359.0 KB              | 130.3 KB    | 393.1 KB              | 142.2 KB    | +34.1 KB（+9.5%）                        |
+| CSS  | 40.8 KB               | 8.4 KB      | 41.0 KB               | 8.5 KB      | +0.2 KB                                  |
+| 字体 | 907.1 KB              | 907.4 KB    | 907.1 KB              | 907.4 KB    | 0                                        |
+| 图片 | 349.7 KB              | 349.2 KB    | 349.7 KB              | 349.2 KB    | 0                                        |
+| HTML | 0.8 KB                | 0.5 KB      | 0.9 KB                | 0.6 KB      | +0.2 KB（内联的 modulepreload 判断脚本） |
+| 合计 | 1,657.4 KB（80 文件） | 1,395.8 KB  | 1,691.9 KB（82 文件） | 1,407.8 KB  | +34.4 KB（+2.1%）                        |
+
+改动后 JS 分成入口 267.8 KB（gzip 86.2 KB）、聊天页 110.7 KB（gzip 50.5 KB）、设置对话框 14.6 KB（gzip 5.5 KB）。第 4 节的表是 2026-09-24 的数据，所以改动前的数字与第 4 节略有不同（JS 358.2 → 359.0 KB）。
+
+无网络限速：
+
+| 指标（5 次中位数）      | 改动前   | 拆包，未加 modulepreload | 拆包 + modulepreload（最终） |
+| ----------------------- | -------- | ------------------------ | ---------------------------- |
+| /login 表单出现         | 23.9 ms  | 21.6 ms                  | 21.7 ms                      |
+| /login 首次内容绘制     | 40 ms    | 36 ms                    | 36 ms                        |
+| /login JS 请求数        | 1        | 2                        | 2                            |
+| 点击登录 → 聊天页挂载   | 194 ms   | 191.2 ms                 | 185.5 ms                     |
+| / 导航开始 → 聊天页挂载 | 26.2 ms  | 27.4 ms                  | 23.9 ms                      |
+| / /me 请求开始          | 18.9 ms  | 16.4 ms                  | 16.1 ms                      |
+| / JS 请求数             | 1        | 3                        | 3                            |
+| / JS 传输字节           | 133711 B | 146238 B                 | 146483 B                     |
+| 点击设置 → 弹窗出现     | 4.5 ms   | 4.2 ms                   | 4.5 ms                       |
+
+慢速 4G：
+
+| 指标（5 次中位数）      | 改动前    | 拆包，未加 modulepreload | 拆包 + modulepreload（最终） |
+| ----------------------- | --------- | ------------------------ | ---------------------------- |
+| /login 表单出现         | 1060.6 ms | 835.5 ms                 | 841.4 ms                     |
+| /login 首次内容绘制     | 1080 ms   | 852 ms                   | 860 ms                       |
+| /login JS 请求数        | 1         | 2                        | 2                            |
+| 点击登录 → 聊天页挂载   | 201.1 ms  | 199.1 ms                 | 202.1 ms                     |
+| / 导航开始 → 聊天页挂载 | 1069.7 ms | 1345.6 ms                | 1104.9 ms                    |
+| / /me 请求开始          | 1057.8 ms | 828.7 ms                 | 1090.2 ms                    |
+| / JS 请求数             | 1         | 3                        | 3                            |
+| / JS 传输字节           | 133711 B  | 146238 B                 | 146483 B                     |
+| 点击设置 → 弹窗出现     | 4.9 ms    | 4.8 ms                   | 4.8 ms                       |
+
+"最终"一列在最终构建上重测；"拆包，未加 modulepreload"一列是当时的中间构建，JS 字节比最终版少 245 B。最终版里已登录刷新时聊天页 chunk 与入口 JS 同时开始下载（无限速：入口 2 ms、聊天页 chunk 4 ms、`/me` 16.1 ms；慢速 4G：入口 160 ms、聊天页 chunk 163 ms）。"拆包，未加 modulepreload"一列说明为什么需要构建插件：聊天页 chunk 要等入口 JS 执行完才开始下载，慢速 4G 下已登录刷新慢 276 ms。已登录刷新下载的 JS 总量从 130.6 KB 增加到 143.0 KB（虚拟列表库与新代码，以及聊天页挂载后预取的设置对话框 chunk）。
+
+只给聊天页套 `React.lazy` 并在入口里提前 `import()` 的中间版本，用页面内 `MutationObserver` 探针测得：已登录刷新聊天页 335 ms 才挂载、202 ms 起闪出加载动画，打开设置约 300 ms（React 19 的 Suspense 兜底节流，见 `docs/interview.md` 5.21）；改用 `lazyWithPreload` 后同一探针 3 次：聊天页 36–37 ms 挂载、无加载动画，设置直接打开。
+
+### 10.4 复现
+
+```bash
+# 后端（backend/，临时库；CORS_ORIGINS 要包含 preview 的来源）
+cd backend && DATABASE_URL=sqlite:////tmp/perf.db JWT_SECRET=<任意 32 字节以上> AI_MOCK=1 DAILY_MESSAGE_LIMIT=1000 \
+  CORS_ORIGINS=http://127.0.0.1:5791 .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8791
+# 种子（同样的环境变量）
+backend/.venv/bin/python scripts/measure/seed-messages.py
+# 前端
+cd frontend && VITE_API_BASE_URL=http://127.0.0.1:8791 pnpm exec vite build --outDir /tmp/perf-dist && \
+  pnpm exec vite preview --outDir /tmp/perf-dist --host 127.0.0.1 --port 5791 --strictPort
+# 度量
+node scripts/measure/chat-perf.mjs --base http://127.0.0.1:5791 --api http://127.0.0.1:8791 \
+  --sizes 100:诀,500:卡缪,2000:弭弗 --cpu 1,4 --runs 5 --out chat-perf.json
+node scripts/measure/chat-perf.mjs --lazy --base http://127.0.0.1:5791 --api http://127.0.0.1:8791 --runs 5 --network slow4g --out chat-perf-lazy.json
+```
+
+改动前的数据要先把 HEAD（6f2055b）导出到另一目录再按同样步骤构建与启动。

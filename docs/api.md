@@ -45,6 +45,10 @@ interface Message {
   status: 'completed' | 'aborted' | 'failed';
   created_at: string;
 }
+interface MessagePage {
+  items: Message[]; // 按 id 升序
+  has_more: boolean; // items 第一条之前是否还有更早的消息
+}
 ```
 
 | 方法   | 路径                                     | 请求体             | 成功                                                           | 失败                                                       |
@@ -52,11 +56,17 @@ interface Message {
 | GET    | `/api/conversations`                     | —                  | `200 Conversation[]`（按角色内置顺序，再按 `created_at` 升序） |                                                            |
 | POST   | `/api/conversations`                     | `{character_name}` | `201 Conversation`                                             | `422` 角色名不存在                                         |
 | DELETE | `/api/conversations/{id}`                | —                  | `204`                                                          | `404` 不存在或不属于当前用户；`409 该角色至少保留一个会话` |
-| GET    | `/api/conversations/{id}/messages`       | —                  | `200 Message[]`（按 id 升序）                                  | `404`                                                      |
+| GET    | `/api/conversations/{id}/messages`       | —                  | `200 MessagePage`（游标分页，见表下）                          | `404`；`422` `limit` 越界                                  |
 | POST   | `/api/conversations/{id}/messages/clear` | —                  | `204`（只清可见消息，上下文保留）                              | `404`                                                      |
 | POST   | `/api/conversations/{id}/context/clear`  | —                  | `204`（只清 AI 上下文，消息保留）                              | `404`                                                      |
 | POST   | `/api/conversations/{id}/chat`           | `{text}`           | `200 text/event-stream`（见第 3 节）                           | `404`；`422` 文本为空；`429 今日额度已用完`                |
 | POST   | `/api/conversations/{id}/chat/stop`      | —                  | `200 {stopped: boolean}`（见第 3 节"停止生成"）                | `404`                                                      |
+
+消息分页 `GET /api/conversations/{id}/messages?limit=&before_id=`：
+
+- 查询参数：`limit` 为每页条数，1–100，默认 50，越界返回 `422`；`before_id` 可选，只取 id 小于它的消息，不传表示从最新一条开始
+- 返回本会话中符合条件的最近 `limit` 条，`items` 按 id 升序；`has_more` 表示本页第一条之前是否还有更早的消息（后端按 id 倒序多取 1 条判断，不另查总数）；会话没有消息时返回 `{items: [], has_more: false}`
+- 前端打开会话时不带 `before_id` 取最新一页；加载更早历史时以已加载的最早一条消息的 id 作为 `before_id`，`has_more` 为 false 后不再请求
 
 ## 3. AI 对话流 `POST /api/conversations/{id}/chat`
 
@@ -85,7 +95,7 @@ data: [DONE]
 - 上游错误映射：`401/403` → "上游认证失败（<code>）"；`429` → "上游限流，请稍后再试"；`5xx` → "上游服务异常（<code>）"；超时（连接 10s / 读取 60s）→ "上游响应超时"；其他 → "上游请求失败：<原因>"
 - 持久化规则（流结束、上游出错、显式停止、客户端断开时都执行）：把已收到的全文按 `\n` 拆分，去掉每行首尾空白，丢弃空行，每行保存为一条 `other` 消息；正常结束 `status = 'completed'`，显式停止或客户端断开 `status = 'aborted'`（未完成的半行丢弃）；出错时额外保存一条 `other` 消息，文本为 `[错误: <中文原因>]`，`status = 'failed'`
 - 上下文：正常结束时把完整回复追加为 `ContextEntry(role='assistant')`；被中断时追加已完成的行；出错时不追加
-- `[DONE]` 一定在持久化完成之后才发出：客户端收到 `[DONE]` 时 `GET /messages` 已能读到本次回复
+- `[DONE]` 一定在持久化完成之后才发出：客户端收到 `[DONE]` 时 `GET /messages` 的最新一页已能读到本次回复
 - 请求头：`Cache-Control: no-cache`、`X-Accel-Buffering: no`
 - `AI_MOCK=1` 时不请求上游：以 80ms 间隔分块发送固定文本 `"收到，管理员。\n这是一条来自 mock 的回复。\n第三行用于验证分段。"`，用于 E2E、CI 和无 Key 的本地演示
 
@@ -101,7 +111,7 @@ data: [DONE]
 - 用 `fetch` + `ReadableStream` + `TextDecoder('utf-8', {stream: true})` 解析，按 `\n` 切帧，未完成的尾部留在缓冲区
 - 收到 `delta` 后累积文本；每出现一个完整行（`\n`）就把该行（去掉首尾空白、跳过空行）显示为一个 AI 气泡；`[DONE]` 后剩余非空文本作为最后一个气泡（已请求停止时不显示，与后端丢弃半行一致）
 - 每次请求独立创建 `AbortController`；停止生成先 `POST …/chat/stop`（返回即代表已持久化），再 `abort()` 兜底结束本地 fetch，已显示的行保留
-- 流结束（`[DONE]`、错误、中断）后重新拉取 `GET /messages`，用持久化结果替换本地临时气泡；`[DONE]` 与 stop 的响应都在后端落库之后才发出，所以这次重拉一定读到完整结果
+- 流结束（`[DONE]`、错误、中断）后只重新拉取最新一页（`GET /messages`，默认 `limit`、不带 `before_id`），用持久化结果替换本地临时气泡和乐观显示的我方消息；已加载的更早历史（id 小于这一页第一条的消息）保留，与这一页合并，此时"是否还有更早的消息"沿用合并前的值（这一页的 `has_more` 只描述它自己之前，不能覆盖已加载到底的状态）；一次回复超过一页（这一页第一条比已加载的最后一条还新）时两段之间可能缺消息，只保留这一页并采用它的 `has_more`，缺的部分向上滚动时重新加载；`[DONE]` 与 stop 的响应都在后端落库之后才发出，所以这次重拉一定读到完整结果
 
 ## 4. 设置 `/api/settings`
 

@@ -54,6 +54,7 @@ flowchart LR
 | 前端   | Zustand（每个 feature 一个 store）                      | 5.0                                                            |
 | 前端   | React Router                                            | 7.18                                                           |
 | 前端   | clsx                                                    | 2.1                                                            |
+| 前端   | @tanstack/react-virtual（长会话虚拟列表）               | 3.14                                                           |
 | 后端   | Python                                                  | 3.13                                                           |
 | 后端   | FastAPI / Starlette                                     | 0.141 / 1.7                                                    |
 | 后端   | SQLAlchemy 2（同步 Session）                            | 2.0                                                            |
@@ -100,7 +101,7 @@ flowchart LR
 │   ├── Dockerfile            python:3.13-slim，CMD 读 ${PORT:-8000}
 │   └── pyproject.toml        依赖与 ruff / pytest 配置
 ├── e2e/                      Playwright：playwright.config.ts 自动拉起后端（AI_MOCK=1）与前端
-├── scripts/measure/          字体子集化、产物体积对比、首个气泡计时、prompt_tokens 曲线
+├── scripts/measure/          字体子集化、产物体积对比、首个气泡计时、prompt_tokens 曲线、长会话种子数据与聊天区性能
 ├── docs/
 │   ├── api.md                接口契约（前后端共同遵守）
 │   ├── conventions.md        工程与注释约定
@@ -185,6 +186,9 @@ pnpm check:docs                    # 源码 💡 注释指向的 docs/interview.
 
 # 度量脚本（docs/interview.md 第 4 节有数据与复现步骤）
 node scripts/measure/bundle-size.mjs
+backend/.venv/bin/python scripts/measure/seed-messages.py   # 长会话种子数据（100 / 500 / 2000 条）
+node scripts/measure/chat-perf.mjs --base http://127.0.0.1:5791 --api http://127.0.0.1:8791          # 长会话：打开耗时 / DOM / 滚动帧时长
+node scripts/measure/chat-perf.mjs --lazy --base http://127.0.0.1:5791 --api http://127.0.0.1:8791   # 首屏按需加载；完整步骤见 docs/notes/measurements.md 第 10 节
 ```
 
 提交时 husky 会对暂存文件运行 lint-staged（ESLint / ruff / Prettier），commit-msg 由 commitlint 校验 Conventional Commits。
