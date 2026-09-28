@@ -2,12 +2,13 @@
  * @file 注册页 /register：用户名（3–20 位字母/数字/下划线）、密码（6–64 个字符，UTF-8 不超过 72 字节）、确认密码。
  * 本地校验失败在对应输入框下方提示；用户名被占用来自后端 409。注册成功即登录并跳 /。
  */
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate } from 'react-router';
 import { DialogButton } from '@/components/DialogButton';
 import { ApiError } from '@/lib/http';
 import { FormField } from '@/features/auth/FormField';
 import { useAuthStore } from '@/features/auth/authStore';
+import { ChatPageLoader } from '@/features/chat/loadChatPage';
 
 const USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;
 const PASSWORD_ERROR = '密码为 6–64 位；含中文时最多 24 个字';
@@ -43,6 +44,11 @@ export function RegisterPage() {
   const [confirm, setConfirm] = useState('');
   const [errors, setErrors] = useState<RegisterErrors>({});
   const [submitting, setSubmitting] = useState(false);
+
+  // 页面渲染后预取聊天页代码，登录或注册成功时跳转不再等下载
+  useEffect(() => {
+    void ChatPageLoader.preload();
+  }, []);
 
   if (token !== null) return <Navigate to="/" replace />;
 

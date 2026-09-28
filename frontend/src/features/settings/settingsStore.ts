@@ -7,6 +7,7 @@
 import { create } from 'zustand';
 import { toastError } from '@/components/toastStore';
 import { ApiError } from '@/lib/http';
+import { onUserSwitch } from '@/features/auth/userSwitch';
 import { useChatStore } from '@/features/chat/chatStore';
 import {
   clearAllContext as apiClearAllContext,
@@ -160,3 +161,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
 
   reset: () => set(INITIAL),
 }));
+
+// 用户切换时清掉上一个用户的设置、提示词与统计
+onUserSwitch(() => useSettingsStore.getState().reset());

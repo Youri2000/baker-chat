@@ -1,6 +1,7 @@
 /**
  * @file 聊天数据层：会话列表、按会话缓存的消息、选中/折叠状态，以及 AI 流式回复。
- * 流式回复期间用 streaming.bubbles 逐行暂存 AI 气泡，流结束后重新拉取该会话消息替换；
+ * 消息分页加载：打开会话只取最近一页，滚到顶部附近再取更早的一页插到前面；
+ * 流式回复期间用 streaming.bubbles 逐行暂存 AI 气泡，流结束后重新拉取最新一页，与已加载的更早历史合并；
  * 停止生成先走后端 /chat/stop（它返回时服务端已落库并以 [DONE] 结束流），本地 AbortController 只兜底结束 fetch。
  * 所有动作失败时自行 toast，不向调用方 reject（网络与鉴权是唯一的错误边界）。
  */
@@ -9,6 +10,7 @@ import { toastError } from '@/components/toastStore';
 import { CHARACTERS } from '@/constants/characters';
 import { ApiError, tokenStorage } from '@/lib/http';
 import { streamSse, takeCompletedLines } from '@/lib/sse';
+import { onUserSwitch } from '@/features/auth/userSwitch';
 import {
   clearContext as apiClearContext,
   clearMessages as apiClearMessages,
@@ -19,6 +21,7 @@ import {
   stopChat,
   type Conversation,
   type Message,
+  type MessagePage,
 } from '@/features/chat/api';
 
 /** 进行中的 AI 回复 */
@@ -36,8 +39,12 @@ export interface StreamingState {
 /** 聊天数据；reset 回到 INITIAL */
 interface ChatData {
   conversations: Conversation[];
-  /** 会话 id → 消息；未加载过的会话没有键 */
+  /** 会话 id → 已加载的消息（最近一页加上已加载的更早历史）；未加载过的会话没有键 */
   messagesByConversation: Record<number, Message[]>;
+  /** 会话 id → 已加载的消息之前是否还有更早的消息 */
+  hasMoreByConversation: Record<number, boolean>;
+  /** 正在加载更早历史的会话；同一时刻只进行一次 */
+  loadingEarlierId: number | null;
   activeConversationId: number | null;
   /** 选中的主卡（常显白色遮罩）；点主卡或选子卡都会设置 */
   activeCharacterName: string | null;
@@ -50,8 +57,10 @@ interface ChatData {
 export interface ChatState extends ChatData {
   /** 拉取全部会话 */
   loadConversations: () => Promise<void>;
-  /** 选中会话并拉取其消息，同时选中所属主卡 */
+  /** 选中会话并拉取最近一页消息，同时选中所属主卡 */
   selectConversation: (id: number) => Promise<void>;
+  /** 加载某会话更早的一页消息并插到前面；没有更早的消息或已有加载在进行时不做任何事 */
+  loadEarlierMessages: (id: number) => Promise<void>;
   /** 点主卡：切换折叠并设为选中主卡 */
   toggleCharacter: (name: string) => void;
   /** 为角色新建空会话：展开主卡并选中新会话 */
@@ -76,6 +85,8 @@ export interface ChatState extends ChatData {
 const INITIAL: ChatData = {
   conversations: [],
   messagesByConversation: {},
+  hasMoreByConversation: {},
+  loadingEarlierId: null,
   activeConversationId: null,
   activeCharacterName: null,
   collapsedCharacters: Object.fromEntries(CHARACTERS.map((c) => [c.name, true])),
@@ -93,14 +104,37 @@ function withLastMessage(
   return conversations.map((c) => (c.id === id ? { ...c, last_message: lastMessage } : c));
 }
 
+/**
+ * 把最新一页与已加载的消息合并：两段有重叠时保留最新一页之前的已加载历史，乐观显示的临时消息（负数 id）丢弃；
+ * 最新一页整体比已加载的消息更新（回复超过一页）时中间可能缺消息，只保留最新一页
+ */
+function mergeLatest(
+  loaded: Message[] | undefined,
+  page: MessagePage,
+  hadMore: boolean,
+): { messages: Message[]; hasMore: boolean } {
+  const persisted = (loaded ?? []).filter((m) => m.id > 0);
+  const first = page.items[0];
+  const last = persisted.at(-1);
+  if (first === undefined || last === undefined || first.id > last.id) {
+    return { messages: page.items, hasMore: page.has_more };
+  }
+  const earlier = persisted.filter((m) => m.id < first.id);
+  return {
+    messages: [...earlier, ...page.items],
+    hasMore: earlier.length > 0 ? hadMore : page.has_more,
+  };
+}
+
 /** 聊天数据层 */
 export const useChatStore = create<ChatState>()((set, get) => {
-  /** 拉取某会话消息并同步它的预览 */
+  /** 拉取某会话最近一页消息（替换已加载的消息）并同步它的预览 */
   async function reloadMessages(id: number): Promise<void> {
-    const messages = await getMessages(id);
+    const page = await getMessages(id);
     set((s) => ({
-      messagesByConversation: { ...s.messagesByConversation, [id]: messages },
-      conversations: withLastMessage(s.conversations, id, messages),
+      messagesByConversation: { ...s.messagesByConversation, [id]: page.items },
+      hasMoreByConversation: { ...s.hasMoreByConversation, [id]: page.has_more },
+      conversations: withLastMessage(s.conversations, id, page.items),
     }));
   }
 
@@ -126,6 +160,36 @@ export const useChatStore = create<ChatState>()((set, get) => {
       }
     },
 
+    loadEarlierMessages: async (id) => {
+      const { loadingEarlierId, hasMoreByConversation, messagesByConversation } = get();
+      const oldest = messagesByConversation[id]?.find((m) => m.id > 0);
+      if (loadingEarlierId !== null || hasMoreByConversation[id] !== true || oldest === undefined) {
+        return;
+      }
+      set({ loadingEarlierId: id });
+      try {
+        const page = await getMessages(id, oldest.id);
+        set((s) => {
+          const current = s.messagesByConversation[id];
+          // 加载期间会话被重新打开或清空：最早一条已不是请求时那条，这一页作废
+          if (current === undefined || current.find((m) => m.id > 0)?.id !== oldest.id) {
+            return { loadingEarlierId: null };
+          }
+          return {
+            messagesByConversation: {
+              ...s.messagesByConversation,
+              [id]: [...page.items, ...current],
+            },
+            hasMoreByConversation: { ...s.hasMoreByConversation, [id]: page.has_more },
+            loadingEarlierId: null,
+          };
+        });
+      } catch (err) {
+        toastError(err);
+        set({ loadingEarlierId: null });
+      }
+    },
+
     toggleCharacter: (name) =>
       set((s) => ({
         activeCharacterName: name,
@@ -143,6 +207,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
           return {
             conversations,
             messagesByConversation: { ...s.messagesByConversation, [created.id]: [] },
+            hasMoreByConversation: { ...s.hasMoreByConversation, [created.id]: false },
             collapsedCharacters: { ...s.collapsedCharacters, [characterName]: false },
             activeConversationId: created.id,
             activeCharacterName: characterName,
@@ -167,8 +232,10 @@ export const useChatStore = create<ChatState>()((set, get) => {
         const conversations = s.conversations.filter((c) => c.id !== id);
         const messagesByConversation = { ...s.messagesByConversation };
         delete messagesByConversation[id];
+        const hasMoreByConversation = { ...s.hasMoreByConversation };
+        delete hasMoreByConversation[id];
         if (removed === undefined || s.activeConversationId !== id) {
-          return { conversations, messagesByConversation };
+          return { conversations, messagesByConversation, hasMoreByConversation };
         }
         // 删的是当前会话：改选同角色中原位置的下一个，没有则上一个
         const siblings = conversations.filter((c) => c.character_name === removed.character_name);
@@ -176,7 +243,12 @@ export const useChatStore = create<ChatState>()((set, get) => {
           .filter((c) => c.character_name === removed.character_name)
           .findIndex((c) => c.id === id);
         const next = siblings[Math.min(oldIndex, siblings.length - 1)];
-        return { conversations, messagesByConversation, activeConversationId: next.id };
+        return {
+          conversations,
+          messagesByConversation,
+          hasMoreByConversation,
+          activeConversationId: next.id,
+        };
       });
       const nextId = get().activeConversationId;
       if (nextId !== null && get().messagesByConversation[nextId] === undefined) {
@@ -189,6 +261,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         await apiClearMessages(id);
         set((s) => ({
           messagesByConversation: { ...s.messagesByConversation, [id]: [] },
+          hasMoreByConversation: { ...s.hasMoreByConversation, [id]: false },
           conversations: withLastMessage(s.conversations, id, []),
         }));
       } catch (err) {
@@ -273,16 +346,21 @@ export const useChatStore = create<ChatState>()((set, get) => {
       // ⚠️ 走到这里服务端一定已落库：[DONE] 在后端 finally 之后才发，stopGeneration 也在 stop 返回后才 abort；
       // 持久化结果与 streaming=null 在同一次 set 里落地，列表不会渲染"临时气泡 + 持久化消息"并存的中间状态
       try {
-        const messages = await getMessages(conversationId);
-        set((s) =>
-          s.streaming === null
-            ? s
-            : {
-                messagesByConversation: { ...s.messagesByConversation, [conversationId]: messages },
-                conversations: withLastMessage(s.conversations, conversationId, messages),
-                streaming: null,
-              },
-        );
+        const page = await getMessages(conversationId);
+        set((s) => {
+          if (s.streaming === null) return s;
+          const { messages, hasMore } = mergeLatest(
+            s.messagesByConversation[conversationId],
+            page,
+            s.hasMoreByConversation[conversationId] ?? false,
+          );
+          return {
+            messagesByConversation: { ...s.messagesByConversation, [conversationId]: messages },
+            hasMoreByConversation: { ...s.hasMoreByConversation, [conversationId]: hasMore },
+            conversations: withLastMessage(s.conversations, conversationId, messages),
+            streaming: null,
+          };
+        });
       } catch (err) {
         toastError(err);
         set({ streaming: null });
@@ -306,7 +384,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       streaming.controller.abort();
     },
 
-    forgetMessages: () => set({ messagesByConversation: {} }),
+    forgetMessages: () => set({ messagesByConversation: {}, hasMoreByConversation: {} }),
 
     reset: () => {
       get().streaming?.controller.abort();
@@ -314,3 +392,6 @@ export const useChatStore = create<ChatState>()((set, get) => {
     },
   };
 });
+
+// 用户切换时清掉会话、消息与选中状态，并中止进行中的回复流
+onUserSwitch(() => useChatStore.getState().reset());

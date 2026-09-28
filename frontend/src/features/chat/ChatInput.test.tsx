@@ -1,23 +1,13 @@
 /**
- * @file ChatInput 测试：Enter 发送并清空、Shift+Enter 换行、空白不发送、粘贴只取纯文本、
- * 表情插入到光标处并序列化为 token、输入框失焦后表情插到末尾、流式期间禁用输入且发送按钮变停止、
- * 弹层外 pointerdown 关闭。
+ * @file ChatInput 测试（组件接线层）：Enter 与发送按钮把文本交给 chatStore.sendMessage 并清空、
+ * 经表情弹层把表情插到光标处并序列化为 token、弹层外 pointerdown 关闭、流式期间禁用输入且发送按钮变停止、
+ * 回复期间点击仍开着的弹层不插入表情。键盘、输入法、粘贴、光标等编辑规则的细节见 useChatComposer.test.tsx。
  */
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatInput } from '@/features/chat/ChatInput';
 import { useChatStore } from '@/features/chat/chatStore';
-
-/** jsdom 没有 execCommand：桩实现把 insertText 的文本追加到当前焦点元素末尾 */
-function stubExecCommand() {
-  const fn = vi.fn((_command: string, _ui: boolean, text?: string) => {
-    document.activeElement?.append(document.createTextNode(text ?? ''));
-    return true;
-  });
-  document.execCommand = fn;
-  return fn;
-}
 
 /** 渲染输入面板并替换 store 里的发送 / 停止动作为 spy */
 function setup() {
@@ -35,47 +25,21 @@ function setup() {
 describe('ChatInput', () => {
   beforeEach(() => {
     useChatStore.setState({ streaming: null, activeConversationId: 1 });
-    stubExecCommand();
   });
 
-  /** Enter：序列化文本发送，输入框清空 */
-  it('Enter 发送并清空输入框', async () => {
+  /** Enter 与发送按钮：序列化文本交给 store 发送，输入框清空 */
+  it('Enter 与发送按钮都发送并清空输入框', async () => {
     const { sendMessage, input } = setup();
     await userEvent.type(input, '你好');
     await userEvent.keyboard('{Enter}');
     expect(sendMessage).toHaveBeenCalledWith('你好');
     expect(input.innerHTML).toBe('');
-  });
-
-  /** Shift+Enter：插入换行不发送；随后 Enter 发出两行 */
-  it('Shift+Enter 换行，Enter 发出两行', async () => {
-    const { sendMessage, input } = setup();
-    await userEvent.type(input, '你好');
-    await userEvent.keyboard('{Shift>}{Enter}{/Shift}');
-    expect(sendMessage).not.toHaveBeenCalled();
-    expect(document.execCommand).toHaveBeenCalledWith('insertText', false, '\n');
     await userEvent.type(input, '在吗');
-    await userEvent.keyboard('{Enter}');
-    expect(sendMessage).toHaveBeenCalledWith('你好\n在吗');
-  });
-
-  /** 空白内容不能发送 */
-  it('空白不发送', async () => {
-    const { sendMessage, input } = setup();
-    await userEvent.type(input, '   ');
-    await userEvent.keyboard('{Enter}');
     await userEvent.click(screen.getByRole('button', { name: '发送' }));
-    expect(sendMessage).not.toHaveBeenCalled();
-  });
-
-  /** 粘贴只取 text/plain */
-  it('粘贴只保留纯文本', () => {
-    const { input } = setup();
-    input.focus();
-    fireEvent.paste(input, {
-      clipboardData: { getData: (type: string) => (type === 'text/plain' ? '纯文本' : '<b>x</b>') },
-    });
-    expect(document.execCommand).toHaveBeenCalledWith('insertText', false, '纯文本');
+    expect(sendMessage).toHaveBeenLastCalledWith('在吗');
+    expect(input.innerHTML).toBe('');
+    // 发送按钮按下时不抢焦点，可以接着输入下一条
+    expect(document.activeElement).toBe(input);
   });
 
   /** 光标放在"你好|世界"中间点第 1 个表情：显示为图片，发送时为 token */
@@ -91,24 +55,6 @@ describe('ChatInput', () => {
     expect(img?.nextSibling?.textContent).toBe('世界');
     await userEvent.keyboard('{Enter}');
     expect(sendMessage).toHaveBeenCalledWith('你好[sns_emoji_001]世界');
-  });
-
-  /** 输入框失焦（选区在别处）后点表情：插到内容末尾而不是开头，焦点回到输入框 */
-  it('输入框失焦后表情插到末尾', async () => {
-    const { sendMessage, input } = setup();
-    await userEvent.type(input, '你好');
-    // 模拟 Chrome：contenteditable 失焦后再 focus() 会把光标放到开头
-    input.addEventListener('focus', () => window.getSelection()!.collapse(input, 0));
-    input.blur();
-    window.getSelection()!.collapse(document.body, 0);
-    await userEvent.click(screen.getByRole('button', { name: '表情' }));
-    await userEvent.click(screen.getByRole('button', { name: '[sns_emoji_001]' }));
-    const img = input.querySelector('img')!;
-    expect(img.previousSibling?.textContent).toBe('你好');
-    expect(img.nextSibling).toBeNull();
-    expect(document.activeElement).toBe(input);
-    await userEvent.keyboard('{Enter}');
-    expect(sendMessage).toHaveBeenCalledWith('你好[sns_emoji_001]');
   });
 
   /** 弹层外按下指针关闭弹层，表情按钮自身不关闭 */
@@ -139,5 +85,32 @@ describe('ChatInput', () => {
     expect(screen.queryByRole('button', { name: '发送' })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: '停止' }));
     expect(stopGeneration).toHaveBeenCalledOnce();
+  });
+
+  /** 打开弹层后发送，回复期间点弹层里的表情不插入；回复结束后再点，表情插到光标处 */
+  it('回复期间点击弹层表情不插入，结束后正常插入', async () => {
+    const { sendMessage, input } = setup();
+    await userEvent.type(input, '你好');
+    await userEvent.click(screen.getByRole('button', { name: '表情' }));
+    await userEvent.keyboard('{Enter}');
+    expect(sendMessage).toHaveBeenCalledWith('你好');
+    act(() => {
+      useChatStore.setState({
+        streaming: {
+          conversationId: 1,
+          bubbles: [],
+          pending: true,
+          controller: new AbortController(),
+        },
+      });
+    });
+    await userEvent.click(screen.getByRole('button', { name: '[sns_emoji_001]' }));
+    expect(input.innerHTML).toBe('');
+
+    act(() => {
+      useChatStore.setState({ streaming: null });
+    });
+    await userEvent.click(screen.getByRole('button', { name: '[sns_emoji_001]' }));
+    expect(input.querySelector('img')?.dataset.emoji).toBe('[sns_emoji_001]');
   });
 });

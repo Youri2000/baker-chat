@@ -27,6 +27,12 @@ export interface Message {
   created_at: string;
 }
 
+/** 一页消息：items 按 id 升序；has_more 表示 items 之前还有更早的消息 */
+export interface MessagePage {
+  items: Message[];
+  has_more: boolean;
+}
+
 /** 全部会话：按角色内置顺序，再按创建时间 */
 export function getConversations(): Promise<Conversation[]> {
   return http<Conversation[]>('/conversations');
@@ -45,9 +51,10 @@ export function deleteConversation(id: number): Promise<void> {
   return http<void>(`/conversations/${id}`, { method: 'DELETE' });
 }
 
-/** 某会话的全部消息，按 id 升序 */
-export function getMessages(id: number): Promise<Message[]> {
-  return http<Message[]>(`/conversations/${id}/messages`);
+/** 某会话的一页消息（后端默认每页 50 条）：不传 beforeId 取最近一页，传入则只取 id 小于它的更早一页 */
+export function getMessages(id: number, beforeId?: number): Promise<MessagePage> {
+  const query = beforeId === undefined ? '' : `?before_id=${beforeId}`;
+  return http<MessagePage>(`/conversations/${id}/messages${query}`);
 }
 
 /** 只清可见消息，AI 上下文保留 */

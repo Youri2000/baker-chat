@@ -1,23 +1,15 @@
 /**
  * @file 底部输入面板：面板上方渐隐遮罩条 + 面板壳（顶部装饰图）+ contenteditable 胶囊输入框 + 表情 / 发送（停止）圆形按钮
- * + 表情弹层。Enter 发送、Ctrl/Shift/Cmd+Enter 换行、粘贴只取纯文本；发送时用 emojiHtml 把内容序列化成含 token 的文本，
- * 交给 chatStore.sendMessage；流式期间禁用输入并把发送按钮换成停止。
+ * + 表情弹层。键盘、粘贴、光标与表情插入、DOM 转文本等编辑行为都在 useChatComposer，本组件只负责布局、
+ * 弹层开合与停止按钮；发送交给 chatStore.sendMessage，流式期间禁用输入并把发送按钮换成停止。
  */
 import clsx from 'clsx';
-import {
-  useEffect,
-  useRef,
-  useState,
-  type ClipboardEvent,
-  type KeyboardEvent,
-  type MouseEvent,
-} from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PANEL } from '@/constants/design';
-import { type Emoji } from '@/constants/emoji';
 import { MATERIALS } from '@/constants/materials';
 import { useChatStore } from '@/features/chat/chatStore';
 import { EmojiPop } from '@/features/chat/EmojiPop';
-import { emojiToHtml, htmlToEmojiText } from '@/features/chat/emojiHtml';
+import { useChatComposer } from '@/features/chat/useChatComposer';
 
 /** 45px 圆形按钮：hover 叠 20% 黑；禁用半透明 */
 const CIRCLE_BUTTON =
@@ -27,23 +19,19 @@ const CIRCLE_BUTTON =
 const BUTTON_ICON =
   'pointer-events-none absolute inset-[8px] h-[29px] w-[29px] object-contain brightness-[0.267] select-none';
 
-/** 按下按钮时不让输入框失焦（表情插入位置、连续输入都依赖它） */
-function keepInputFocus(event: MouseEvent) {
-  event.preventDefault();
-}
-
 /** 输入面板 */
 export function ChatInput() {
   const streaming = useChatStore((s) => s.streaming);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const stopGeneration = useChatStore((s) => s.stopGeneration);
-  const inputRef = useRef<HTMLDivElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const [popOpen, setPopOpen] = useState(false);
 
   // 同一时刻只允许一条回复在进行：任何会话在流式回复时都禁用输入
   const disabled = streaming !== null;
+  const { inputRef, handleKeyDown, handlePaste, insertEmoji, submit, keepInputFocus } =
+    useChatComposer({ onSend: sendMessage, disabled });
 
   // 弹层展开时，按下弹层与表情按钮以外的任何位置都收起（pointerdown 先于 click，按钮自身的点击照常执行）
   useEffect(() => {
@@ -57,53 +45,6 @@ export function ChatInput() {
     document.addEventListener('pointerdown', handlePointerDown);
     return () => document.removeEventListener('pointerdown', handlePointerDown);
   }, [popOpen]);
-
-  /** 序列化输入框内容并发送；空白不发送 */
-  function handleSend() {
-    const input = inputRef.current!;
-    const text = htmlToEmojiText(input).trim();
-    if (text === '') return;
-    input.innerHTML = '';
-    void sendMessage(text);
-  }
-
-  /** Enter 发送；带 Shift / Ctrl / Cmd 时插入换行（execCommand 保留原生撤销栈） */
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    // ⚠️ 中文输入法选词阶段的 Enter 只是确认候选，不能发送
-    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
-    event.preventDefault();
-    if (event.shiftKey || event.ctrlKey || event.metaKey) {
-      document.execCommand('insertText', false, '\n');
-      return;
-    }
-    handleSend();
-  }
-
-  /** 粘贴只保留纯文本 */
-  function handlePaste(event: ClipboardEvent<HTMLDivElement>) {
-    event.preventDefault();
-    document.execCommand('insertText', false, event.clipboardData.getData('text/plain'));
-  }
-
-  /** ✅ 在光标处插入表情：光标在输入框内则替换选区，否则插到内容末尾；之后光标停在表情后面 */
-  function handlePickEmoji(emoji: Emoji) {
-    const input = inputRef.current!;
-    const selection = window.getSelection()!;
-    // ⚠️ 先判断选区再 focus()：输入框失焦后 Chrome 的 focus() 会把光标放到开头，此时应把光标移到末尾
-    const outside = !input.contains(selection.anchorNode);
-    input.focus();
-    if (outside) {
-      selection.selectAllChildren(input);
-      selection.collapseToEnd();
-    }
-    const fragment = document.createRange().createContextualFragment(emojiToHtml(emoji.token));
-    const range = selection.getRangeAt(0);
-    range.deleteContents();
-    range.insertNode(fragment);
-    range.collapse(false);
-    selection.removeAllRanges();
-    selection.addRange(range);
-  }
 
   return (
     <>
@@ -141,8 +82,8 @@ export function ChatInput() {
           src={MATERIALS.choiceTopDeco}
           alt=""
         />
-        {/* 💡 contenteditable 而非 textarea：文字中间要显示表情图片；换行 / 粘贴走 execCommand 保留原生撤销栈，
-            发送时由 emojiHtml 把 DOM 序列化成含 [sns_emoji_NNN] token 的纯文本，详见 docs/interview.md#contenteditable-emoji */}
+        {/* 💡 contenteditable 而非 textarea：文字中间要显示表情图片；换行、粘贴、表情插入与序列化成 [sns_emoji_NNN] token
+            的编辑规则都在 useChatComposer，详见 docs/interview.md#contenteditable-emoji */}
         <div
           ref={inputRef}
           role="textbox"
@@ -182,13 +123,13 @@ export function ChatInput() {
               aria-label="发送"
               className={CIRCLE_BUTTON}
               onMouseDown={keepInputFocus}
-              onClick={handleSend}
+              onClick={submit}
             >
               <img className={BUTTON_ICON} src={MATERIALS.editBtnChat} alt="" />
             </button>
           )}
         </div>
-        {popOpen && <EmojiPop ref={popRef} onPick={handlePickEmoji} />}
+        {popOpen && <EmojiPop ref={popRef} onPick={insertEmoji} />}
       </div>
     </>
   );

@@ -65,10 +65,11 @@ test('注册后向陈千语发送多行带表情的消息，收到按行分段�
     character_name: string;
   }>;
   const conversation = conversations.find((c) => c.character_name === '陈千语')!;
-  const messages = (await (
+  const messagePage = (await (
     await request.get(`${backendUrl}/api/conversations/${conversation.id}/messages`, { headers })
-  ).json()) as Array<{ side: string; text: string; status: string }>;
-  expect(messages.map((m) => [m.side, m.text, m.status])).toEqual([
+  ).json()) as { items: Array<{ side: string; text: string; status: string }>; has_more: boolean };
+  expect(messagePage.has_more).toBe(false);
+  expect(messagePage.items.map((m) => [m.side, m.text, m.status])).toEqual([
     ['mine', '第一行\n第二行[sns_emoji_001]', 'completed'],
     ...MOCK_LINES.map((line) => ['other', line, 'completed']),
   ]);

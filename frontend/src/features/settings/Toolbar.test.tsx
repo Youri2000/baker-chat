@@ -117,7 +117,8 @@ describe('Toolbar', () => {
     await userEvent.click(screen.getByRole('button', { name: '关闭' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: '设置' }));
-    expect(screen.getByRole('dialog', { name: '设置' })).toBeInTheDocument();
+    // 设置对话框按需加载，等代码到达后才出现
+    expect(await screen.findByRole('dialog', { name: '设置' })).toBeInTheDocument();
     expect(screen.getAllByRole('tab')).toHaveLength(6);
   });
 });

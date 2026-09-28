@@ -2,12 +2,13 @@
  * @file 登录页 /login：用户名 + 密码，展示演示账号并可一键填入。
  * 登录成功后 token 写入 store，本组件随即渲染 <Navigate to="/">；已登录访问也直接跳 /。
  */
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate } from 'react-router';
 import { DialogButton } from '@/components/DialogButton';
 import { ApiError } from '@/lib/http';
 import { FormField } from '@/features/auth/FormField';
 import { useAuthStore } from '@/features/auth/authStore';
+import { ChatPageLoader } from '@/features/chat/loadChatPage';
 
 /** 演示账号（后端 DEMO_USERNAME / DEMO_PASSWORD 的默认值） */
 const DEMO = { username: 'demo', password: 'demo123' } as const;
@@ -20,6 +21,11 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [errors, setErrors] = useState<{ username?: string; password?: string }>({});
   const [submitting, setSubmitting] = useState(false);
+
+  // 页面渲染后预取聊天页代码，登录或注册成功时跳转不再等下载
+  useEffect(() => {
+    void ChatPageLoader.preload();
+  }, []);
 
   if (token !== null) return <Navigate to="/" replace />;
 

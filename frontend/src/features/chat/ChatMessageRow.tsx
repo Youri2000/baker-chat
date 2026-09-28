@@ -1,6 +1,7 @@
 /**
  * @file 一行消息：flex 行内放气泡（对方靠左、我方靠右），头像绝对定位在行外侧、不参与行高。
- * 行前间距与头像显隐由 chatRows.layoutRows 算出后传入；气泡或加载气泡由 MessageList 作为 children 传入。
+ * 头像显隐由 chatRows.layoutRows 算出后传入；行与行的间距由 MessageList 的虚拟行外层用上一行的 paddingBottom 实现，
+ * 这样虚拟列表测得的行高包含间距（margin 不计入测量尺寸）。气泡或加载气泡由 MessageList 作为 children 传入。
  */
 import clsx from 'clsx';
 import type { ReactNode } from 'react';
@@ -26,8 +27,6 @@ export interface ChatMessageRowProps {
   /** 说话人头像 URL */
   avatar: string;
   showAvatar: boolean;
-  /** 与上一行的间距（px） */
-  gap: number;
   /** 我方头像点击：切换管理员性别 */
   onAvatarClick?: () => void;
   /** ChatBubble 或 LoadingBubble */
@@ -39,7 +38,6 @@ export function ChatMessageRow({
   side,
   avatar,
   showAvatar,
-  gap,
   onAvatarClick,
   children,
 }: ChatMessageRowProps) {
@@ -47,7 +45,6 @@ export function ChatMessageRow({
     <div
       className={clsx('relative flex items-start', side === 'mine' && 'justify-end')}
       style={{
-        marginTop: gap,
         paddingLeft: side === 'other' ? ROW.otherBubbleX : undefined,
         paddingRight: side === 'mine' ? ROW.mineBubblePadRight : undefined,
       }}

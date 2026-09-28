@@ -67,7 +67,7 @@ describe('SubCard', () => {
     useChatStore.setState({ conversations: [conv] });
     mockFetch((req) =>
       req.path === '/api/conversations/7/messages'
-        ? jsonResponse([])
+        ? jsonResponse({ items: [], has_more: false })
         : jsonResponse({ detail: 'not found' }, 404),
     );
     render(<SubCard conversation={conv} gender="female" top={0} />);

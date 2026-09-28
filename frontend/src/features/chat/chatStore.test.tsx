@@ -49,7 +49,8 @@ function setupServer(onStop: () => { stopped: boolean } = () => ({ stopped: fals
   const fetchMock = mockFetch((req) => {
     if (req.path === '/api/conversations') return jsonResponse(CONVERSATIONS);
     const m = /^\/api\/conversations\/(\d+)\/(messages|chat|chat\/stop)$/.exec(req.path);
-    if (m?.[2] === 'messages') return jsonResponse(messages[Number(m[1])]);
+    if (m?.[2] === 'messages')
+      return jsonResponse({ items: messages[Number(m[1])], has_more: false });
     if (m?.[2] === 'chat') return sse.response;
     if (m?.[2] === 'chat/stop') return jsonResponse(onStop());
     return jsonResponse({ detail: 'not found' }, 404);

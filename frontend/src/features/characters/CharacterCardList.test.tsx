@@ -73,7 +73,7 @@ describe('CharacterCardList', () => {
   it('展开主卡并选中会话', async () => {
     mockFetch((req) =>
       req.path === '/api/conversations/100/messages'
-        ? jsonResponse(HISTORY)
+        ? jsonResponse({ items: HISTORY, has_more: false })
         : jsonResponse({ detail: 'not found' }, 404),
     );
     render(<CharacterCardList />);

@@ -139,6 +139,8 @@ export const BUBBLE = {
   /** 加载气泡三个方块：边长 / 间距 */
   loadingDot: 8,
   loadingDotGap: 12,
+  /** 三个方块的闪烁延迟（s），错开 0.2s；加载气泡与按需加载的等待动画共用 */
+  loadingDotDelays: [0, 0.2, 0.4],
 } as const;
 
 /** 底部输入面板：左右各比聊天框缩 2px，顶 = 框底 − 高 − 3 */
@@ -157,6 +159,18 @@ export const PANEL = {
   fieldH: 45,
   padX: 24,
   gap: 16,
+} as const;
+
+/** 回到底部按钮：水平中心对齐消息区中线，底边在面板上方渐隐遮罩条之上 12px */
+export const BACK_TO_BOTTOM = {
+  centerX: CHAT_SCROLL.x + CHAT_SCROLL.w / 2,
+  h: 40,
+  y: PANEL.y - PANEL.edgeMaskH - 12 - 40,
+  padX: 20,
+  gap: 8,
+  fontSize: 16,
+  /** 箭头宽（素材 24×19 等比缩放） */
+  arrow: 16,
 } as const;
 
 /** 表情弹层：紧贴面板顶边向上展开，与面板同宽 */

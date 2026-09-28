@@ -2,15 +2,22 @@
  * @file 右上角固定工具栏（原 App.vue 的 edit-toggle 按钮组）：从右到左 新建会话 / 对话管理 / 设置，
  * 以及它们打开的三个对话框（"请先选中角色卡片"提示、对话管理、设置）。
  * 位于 DesignCanvas 之外（fixed，不随画布缩放）；E 键切换按钮组显隐，对话框不受影响。
+ * 设置对话框按需加载：挂载后预取代码；第一次打开后保持挂载，选中的标签在开关之间保留。
  */
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { DialogButton } from '@/components/DialogButton';
 import { DialogShell } from '@/components/DialogShell';
+import { lazyWithPreload } from '@/components/lazyWithPreload';
+import { PendingDots } from '@/components/PendingDots';
 import { TOOLBAR } from '@/constants/design';
 import { MATERIALS } from '@/constants/materials';
 import { useChatStore } from '@/features/chat/chatStore';
 import { DeleteConfirmDialog } from '@/features/settings/DeleteConfirmDialog';
-import { SettingsDialog } from '@/features/settings/SettingsDialog';
+
+/** 按需加载的设置对话框：聊天页挂载后预取，打开时代码通常已到，直接渲染 */
+const SettingsDialogLoader = lazyWithPreload(() =>
+  import('@/features/settings/SettingsDialog').then((m) => m.SettingsDialog),
+);
 
 /** 当前打开的对话框 */
 type OpenDialog = 'needSelect' | 'manage' | 'settings' | null;
@@ -38,6 +45,13 @@ export function Toolbar() {
   // 仅会话内生效，刷新即恢复可见
   const [visible, setVisible] = useState(true);
   const [dialog, setDialog] = useState<OpenDialog>(null);
+  // 设置对话框第一次打开后保持挂载（open=false 时不渲染内容），选中的标签才能在开关之间保留
+  const [settingsMounted, setSettingsMounted] = useState(false);
+
+  // 聊天页渲染后预取设置对话框代码，打开时不再等下载
+  useEffect(() => {
+    void SettingsDialogLoader.preload();
+  }, []);
 
   useEffect(() => {
     /** ✅ E 键切换显隐；带 Ctrl / Meta / Alt 的组合键不算 */
@@ -102,7 +116,10 @@ export function Toolbar() {
             aria-label="设置"
             className={BUTTON_CLASS}
             style={{ top: TOOLBAR.top, right: TOOLBAR.rightStart + TOOLBAR.step * 2 }}
-            onClick={() => setDialog('settings')}
+            onClick={() => {
+              setSettingsMounted(true);
+              setDialog('settings');
+            }}
           >
             <img
               className={ICON_CLASS}
@@ -122,7 +139,11 @@ export function Toolbar() {
         </DialogButton>
       </DialogShell>
       <DeleteConfirmDialog open={dialog === 'manage'} onClose={closeDialog} />
-      <SettingsDialog open={dialog === 'settings'} onClose={closeDialog} />
+      {settingsMounted && (
+        <Suspense fallback={dialog === 'settings' && <PendingDots />}>
+          <SettingsDialogLoader.Component open={dialog === 'settings'} onClose={closeDialog} />
+        </Suspense>
+      )}
     </>
   );
 }

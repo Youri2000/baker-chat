@@ -4,7 +4,9 @@
  * → [DONE] → 重拉持久化消息。每帧各自包在一次 act 里，与浏览器中"每个网络事件一次提交"的节奏一致。
  * jsdom 没有布局：ResizeObserver 桩不回调，气泡始终按加载尺寸绘制；真实浏览器里每个新气泡还会因测量结果多渲染自身一次，
  * 两组相同，不影响对比。LoadingBubble 的 rAF 展开也桩掉，避免一次时机不定的额外提交。
- * 断言只做宽松的"memo 版 ≤ 对照版"，具体数字打印到 stdout，并记录在 docs/notes/measurements.md。
+ * 消息列表是虚拟列表：挂载的第一次提交只渲染末尾附近的行，所以挂载渲染次数不超过历史条数；
+ * 每个新行被测量后虚拟列表会多触发一次列表重渲染，提交次数因此比不虚拟化时多。
+ * 断言只做宽松的"挂载渲染 ≤ 历史条数"与"memo 版 ≤ 对照版"，具体数字打印到 stdout，并记录在 docs/notes/measurements.md。
  */
 import { act, cleanup, render } from '@testing-library/react';
 import { memo, Profiler, type ReactElement } from 'react';
@@ -103,7 +105,7 @@ const PERSISTED: Message[] = [
 interface Stats {
   /** Profiler onRender 次数（挂载 + 发送 + 每行 + 结束 + 重拉） */
   commits: number;
-  /** 挂载 20 条历史时的 ChatBubble 渲染次数 */
+  /** 挂载 20 条历史时第一次提交的 ChatBubble 渲染次数（虚拟列表只渲染末尾附近的行） */
   mountRenders: number;
   /** 发送到重拉完成期间的 ChatBubble 渲染次数 */
   streamRenders: number;
@@ -131,7 +133,7 @@ async function runScenario(useMemo: boolean): Promise<Stats> {
   mockFetch(async (req) => {
     if (req.path.endsWith('/chat')) return sse.response;
     await gate;
-    return jsonResponse(PERSISTED);
+    return jsonResponse({ items: PERSISTED, has_more: false });
   });
 
   let commits = 0;
@@ -191,7 +193,7 @@ describe('流式回复期间的重渲染次数', () => {
       ].join('\n'),
     );
 
-    expect(memoized.mountRenders).toBe(HISTORY_COUNT);
+    expect(memoized.mountRenders).toBeLessThanOrEqual(HISTORY_COUNT);
     expect(memoized.streamRenders).toBeLessThanOrEqual(control.streamRenders);
     expect(memoized.commits).toBeLessThanOrEqual(control.commits);
   });

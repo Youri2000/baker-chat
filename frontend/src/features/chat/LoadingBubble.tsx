@@ -15,9 +15,6 @@ export interface LoadingBubbleProps {
   side: MessageSide;
 }
 
-/** 三个方块的闪烁延迟（s），错开 0.2s */
-const DOT_DELAYS = [0, 0.2, 0.4];
-
 /** 加载气泡 */
 export function LoadingBubble({ side }: LoadingBubbleProps) {
   const [expanded, setExpanded] = useState(false);
@@ -81,7 +78,7 @@ export function LoadingBubble({ side }: LoadingBubbleProps) {
           )}
           style={{ clipPath, gap: BUBBLE.loadingDotGap }}
         >
-          {DOT_DELAYS.map((delay) => (
+          {BUBBLE.loadingDotDelays.map((delay) => (
             <span
               key={delay}
               className="block animate-loading-dot bg-current"

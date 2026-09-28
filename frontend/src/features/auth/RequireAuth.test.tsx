@@ -42,7 +42,8 @@ describe('RequireAuth', () => {
     useAuthStore.setState({ token: 'jwt', user: { id: 1, username: 'demo' } });
     mockFetch(() => jsonResponse([]));
     renderApp();
-    expect(screen.getByText('//BAKER/会话消息')).toBeInTheDocument();
+    // 聊天页按需加载，等代码到达后才渲染页头
+    expect(await screen.findByText('//BAKER/会话消息')).toBeInTheDocument();
     act(() => useAuthStore.getState().logout());
     expect(await screen.findByRole('heading', { name: '登录' })).toBeInTheDocument();
     expect(tokenStorage.get()).toBeNull();
@@ -68,10 +69,13 @@ describe('RequireAuth', () => {
     useAuthStore.setState({ token: 'jwt', user: { id: 1, username: 'demo' } });
     mockFetch((req) => {
       expect(req.headers.has('Authorization')).toBe(false);
-      return jsonResponse({ detail: '未登录或登录已过期' }, 401);
+      // 只让本用例主动发出的请求 401；聊天页挂载时自己的请求正常返回，主页才能先渲染出来
+      return req.path === '/api/conversations/1/messages'
+        ? jsonResponse({ detail: '未登录或登录已过期' }, 401)
+        : jsonResponse([]);
     });
     renderApp();
-    expect(screen.getByText('//BAKER/会话消息')).toBeInTheDocument();
+    expect(await screen.findByText('//BAKER/会话消息')).toBeInTheDocument();
     await act(async () => {
       await http('/conversations/1/messages').catch(() => undefined);
     });

@@ -1,15 +1,15 @@
 /**
  * @file 登录态：token（持久化在 localStorage，由 lib/http 读写）+ user。
  * 提供登录、注册、退出、启动校验；并向 lib/http 注册 401 处理器（清登录态 + 提示）。
- * 登录态变化（登录、注册、退出、过期）时把 chatStore 与 settingsStore 重置，上一个用户的数据不会留到下一个用户。
+ * 登录态变化（登录、注册、退出、过期）时经 userSwitch 登记表重置已加载的聊天与设置数据，上一个用户的数据不会留到下一个用户；
+ * 这里不直接引用 chatStore / settingsStore，它们随聊天页一起按需加载。
  * 路由守卫只看 token：token 为 null 即跳 /login。
  */
 import { create } from 'zustand';
 import { toast } from '@/components/toastStore';
 import { onUnauthorized, tokenStorage } from '@/lib/http';
 import { login as apiLogin, me, register as apiRegister, type User } from '@/features/auth/api';
-import { useChatStore } from '@/features/chat/chatStore';
-import { useSettingsStore } from '@/features/settings/settingsStore';
+import { resetUserData } from '@/features/auth/userSwitch';
 
 /** 登录态 store */
 export interface AuthState {
@@ -23,12 +23,6 @@ export interface AuthState {
   logout: () => void;
   /** 启动时：有 token 就调 /me 校验并取回 user；401 由 http 层清除登录态 */
   bootstrap: () => Promise<void>;
-}
-
-/** ✅ 清掉上一个用户的会话、消息与设置（chatStore.reset 同时中止进行中的回复流）；新用户的数据到达前页面不显示旧数据 */
-function resetUserData(): void {
-  useChatStore.getState().reset();
-  useSettingsStore.getState().reset();
 }
 
 /** 登录态 */

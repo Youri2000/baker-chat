@@ -2,6 +2,7 @@
  * @file 文字气泡：SVG 圆角矩形 + 尾巴，文字放在 foreignObject 里排版；表情 token 渲染成 inline 图片。
  * 气泡尺寸不再用 canvas 估算，而是用 ResizeObserver 读取文字块的实际渲染尺寸再加内边距得出，
  * 字体晚到（font-display: swap）时也会自动重新测量。
+ * 测得的尺寸按"朝向 + 文本"缓存：长会话虚拟列表里滚回来重新挂载的气泡直接按上次的尺寸绘制，不再先隐藏一帧再撑开。
  * 💡 新追加的气泡先按加载气泡尺寸画一帧，测量结果到达后再过渡到真实尺寸，详见 docs/interview.md#bubble-measure
  */
 import clsx from 'clsx';
@@ -26,19 +27,28 @@ interface InnerSize {
   h: number;
 }
 
+/** 已测量的文字块尺寸：同一朝向、同一文本排出来的尺寸相同，键为 "朝向:文本" */
+const measuredSizes = new Map<string, InnerSize>();
+
 /** 文字气泡；props 全是原始值，memo 让流式追加新行时已有气泡不重渲染 */
 export const ChatBubble = memo(function ChatBubble({ side, text, animate }: ChatBubbleProps) {
   const textRef = useRef<HTMLDivElement>(null);
-  const [inner, setInner] = useState<InnerSize | null>(null);
+  const cacheKey = `${side}:${text}`;
+  // 追加的气泡要从加载尺寸过渡，不读缓存；其余气泡有缓存就直接用
+  const [inner, setInner] = useState<InnerSize | null>(() =>
+    animate ? null : (measuredSizes.get(cacheKey) ?? null),
+  );
 
   // ✅ 观察文字块尺寸：首次布局后与每次回流（字体加载、文本变化）都会回调
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) => {
-      setInner({ w: entry.contentRect.width, h: entry.contentRect.height });
+      const size = { w: entry.contentRect.width, h: entry.contentRect.height };
+      measuredSizes.set(cacheKey, size);
+      setInner(size);
     });
     observer.observe(textRef.current!);
     return () => observer.disconnect();
-  }, []);
+  }, [cacheKey]);
 
   // ⚠️ 未测量时用加载气泡尺寸：ResizeObserver 回调在首帧绘制之后才触发 React 更新，
   // 追加的气泡因此能从 100×单行高平滑过渡到真实尺寸
