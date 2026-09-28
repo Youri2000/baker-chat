@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Baker Chat 系统架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": "docs/diagrams/baker-chat-architecture.html",
+    "viewBox": [1300, 700]
+  },
+  "components": [
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "React 19 SPA",
+      "sublabel": "features/* + React Router 7",
+      "tag": "组件层",
+      "pos": [40, 90],
+      "size": [168, 64]
+    },
+    {
+      "id": "store",
+      "type": "frontend",
+      "label": "Zustand stores",
+      "sublabel": "auth · chat · settings",
+      "tag": "状态层",
+      "pos": [40, 205],
+      "size": [168, 64]
+    },
+    {
+      "id": "lib",
+      "type": "frontend",
+      "label": "http.ts · sse.ts",
+      "sublabel": "Bearer JWT · 手写 SSE 切行",
+      "tag": "网络层",
+      "pos": [40, 320],
+      "size": [168, 64]
+    },
+    {
+      "id": "deps",
+      "type": "security",
+      "label": "deps.py",
+      "sublabel": "HTTPBearer → current_user",
+      "tag": "鉴权 · 跨用户 404",
+      "pos": [300, 320],
+      "size": [168, 64]
+    },
+    {
+      "id": "chat",
+      "type": "backend",
+      "label": "routers/chat.py",
+      "sublabel": "额度 429 · 40 条上下文 · 落库",
+      "tag": "路由 · SSE 转发",
+      "pos": [560, 320],
+      "size": [172, 64]
+    },
+    {
+      "id": "ai",
+      "type": "backend",
+      "label": "ai.py",
+      "sublabel": "httpx 流式 · {delta} / {usage}",
+      "tag": "上游客户端",
+      "pos": [824, 320],
+      "size": [168, 64]
+    },
+    {
+      "id": "deepseek",
+      "type": "external",
+      "label": "DeepSeek API",
+      "sublabel": "POST /chat/completions",
+      "tag": "stream: true",
+      "brand": "deepseek",
+      "pos": [1084, 320],
+      "size": [172, 64]
+    },
+    {
+      "id": "prompts",
+      "type": "database",
+      "label": "character_prompts.json",
+      "sublabel": "29 个角色提示词只在后端",
+      "tag": "数据资产",
+      "pos": [560, 130],
+      "size": [172, 64]
+    },
+    {
+      "id": "streams",
+      "type": "backend",
+      "label": "active_streams",
+      "sublabel": "进程内登记 · stop 等落库",
+      "tag": "单进程可见",
+      "pos": [560, 560],
+      "size": [172, 64]
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "SQLAlchemy 2 Session",
+      "sublabel": "SQLite 本地 · Postgres（Neon）",
+      "tag": "持久化",
+      "pos": [1084, 560],
+      "size": [172, 64]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "浏览器（Vercel 静态托管）",
+      "wraps": ["ui", "store", "lib"],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "FastAPI（backend/app · Render Docker）",
+      "wraps": ["deps", "chat", "ai", "prompts", "streams"],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "DATABASE_URL 切换",
+      "wraps": ["db"],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    { "from": "ui", "to": "store", "label": "调用 action", "labelAt": [124, 180] },
+    { "from": "store", "to": "lib", "label": "sendMessage", "labelAt": [124, 295] },
+    { "from": "lib", "to": "deps", "label": "JSON + JWT", "variant": "emphasis", "labelAt": [264, 394] },
+    { "from": "deps", "to": "chat", "label": "注入 current_user", "labelAt": [514, 394] },
+    {
+      "from": "chat",
+      "to": "ai",
+      "label": "2 system + 最近 40 条",
+      "variant": "emphasis",
+      "labelAt": [778, 394]
+    },
+    { "from": "ai", "to": "deepseek", "label": "httpx 流式 · stream: true", "labelAt": [1038, 394] },
+    { "from": "chat", "to": "prompts", "label": "读角色提示词", "variant": "dashed" },
+    { "from": "chat", "to": "streams", "label": "登记 ActiveStream", "variant": "dashed", "labelAt": [646, 505] },
+    {
+      "from": "chat",
+      "to": "lib",
+      "label": "SSE：data: {delta} → [DONE]",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "bottom"
+    },
+    {
+      "from": "chat",
+      "to": "db",
+      "label": "finally 落库",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "主路径：一次消息穿过四层",
+      "items": [
+        "lib/http.ts 带 Bearer JWT 发出 JSON 请求",
+        "deps.py 校验令牌与会话归属，跨用户一律 404",
+        "chat.py 组装 2 条 system + 最近 40 条上下文，ai.py 转发 DeepSeek",
+        "{delta} 帧以 text/event-stream 回到浏览器并切行"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "两次落库都不依赖流是否成功",
+      "items": [
+        "准入通过就先 commit 用户消息，上游失败也不会丢",
+        "流无论正常、出错、stop 还是客户端断开，都在 finally 里同步落库",
+        "会话在流进行中被删除时不写任何一行，避免孤儿消息"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "进程内状态与它的边界",
+      "items": [
+        "active_streams 是进程内字典，只在单个后端实例内可见",
+        "/chat/stop 置位 stop 并等 finished，即等落库完成才返回",
+        "角色提示词与 API Key 都只在后端，前端拿不到"
+      ]
+    }
+  ]
+}

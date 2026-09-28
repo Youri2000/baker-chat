@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Baker Chat 前端模块依赖",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": "docs/diagrams/frontend-module-dependencies.html",
+    "viewBox": [1180, 640]
+  },
+  "components": [
+    {
+      "id": "auth",
+      "type": "frontend",
+      "label": "features/auth",
+      "sublabel": "authStore · LoginPage · RequireAuth",
+      "tag": "鉴权",
+      "pos": [60, 140],
+      "size": [220, 76]
+    },
+    {
+      "id": "settings",
+      "type": "frontend",
+      "label": "features/settings",
+      "sublabel": "settingsStore · SettingsDialog · Toolbar",
+      "tag": "设置",
+      "pos": [340, 140],
+      "size": [220, 76]
+    },
+    {
+      "id": "chat",
+      "type": "frontend",
+      "label": "features/chat",
+      "sublabel": "chatStore · ChatPage · MessageList",
+      "tag": "聊天 · 依赖最多",
+      "pos": [620, 140],
+      "size": [220, 76]
+    },
+    {
+      "id": "characters",
+      "type": "frontend",
+      "label": "features/characters",
+      "sublabel": "CharacterCardList · SubCard",
+      "tag": "角色卡",
+      "pos": [900, 140],
+      "size": [220, 76]
+    },
+    {
+      "id": "lib",
+      "type": "security",
+      "label": "lib/http.ts · sse.ts",
+      "sublabel": "fetch + Bearer + 手写 SSE 切行",
+      "tag": "网络封装",
+      "pos": [200, 470],
+      "size": [220, 76]
+    },
+    {
+      "id": "shared",
+      "type": "frontend",
+      "label": "components/",
+      "sublabel": "DialogShell · DialogButton · Toast",
+      "tag": "跨功能共享 UI",
+      "pos": [480, 470],
+      "size": [220, 76]
+    },
+    {
+      "id": "consts",
+      "type": "database",
+      "label": "constants/",
+      "sublabel": "characters · design · materials · emoji",
+      "tag": "纯数据",
+      "pos": [760, 470],
+      "size": [220, 76]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "features/* 四个业务域",
+      "wraps": ["auth", "settings", "chat", "characters"],
+      "pad": 40
+    },
+    {
+      "kind": "region",
+      "label": "共享层 · 零反向依赖",
+      "wraps": ["lib", "shared", "consts"],
+      "pad": 24
+    }
+  ],
+  "connections": [
+    { "from": "auth", "to": "lib", "label": "4 处", "fromSide": "bottom", "toSide": "top" },
+    { "from": "auth", "to": "shared", "label": "3 处", "fromSide": "bottom", "toSide": "top" },
+    { "from": "settings", "to": "shared", "label": "5 处", "fromSide": "bottom", "toSide": "top" },
+    { "from": "chat", "to": "consts", "label": "15 处", "variant": "emphasis", "fromSide": "bottom", "toSide": "top" },
+    { "from": "chat", "to": "shared", "label": "2 处", "fromSide": "bottom", "toSide": "top" },
+    { "from": "characters", "to": "consts", "label": "4 处", "fromSide": "bottom", "toSide": "top" },
+    { "from": "shared", "to": "lib", "label": "1 处" },
+    { "from": "shared", "to": "consts", "label": "2 处" },
+    { "from": "auth", "to": "chat", "label": "1 处", "variant": "dashed", "fromSide": "top", "toSide": "top" },
+    { "from": "auth", "to": "settings", "label": "1 处", "variant": "dashed", "labelAt": [310, 165] },
+    { "from": "settings", "to": "auth", "label": "1 处", "variant": "dashed", "labelAt": [310, 240] },
+    { "from": "characters", "to": "chat", "label": "3 处", "variant": "dashed", "labelAt": [870, 165] },
+    { "from": "chat", "to": "characters", "label": "1 处", "variant": "dashed", "labelAt": [870, 240] },
+    { "from": "chat", "to": "settings", "label": "2 处", "variant": "dashed", "labelAt": [590, 165] },
+    { "from": "settings", "to": "chat", "label": "4 处", "variant": "dashed", "labelAt": [590, 240] }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "怎么读这张图",
+      "items": [
+        "边上的数字 = 生产代码里 import 该目标的文件数（57 个 .ts/.tsx，不含 .test）",
+        "实线是 feature 指向共享层，虚线是 feature 之间；共享层没有一条边指回 feature",
+        "settings→lib(2)、chat→lib(2)、settings→constants(2) 与已画出的边同向，为消除交叉没有画"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "features 之间只走 store 或 api",
+      "items": [
+        "7 条跨 feature 依赖里只有 2 条指向组件，且都在同一个文件 ChatPage.tsx（渲染 CharacterCardList 与 Toolbar）",
+        "authStore 退出登录时 reset chatStore 与 settingsStore；settingsStore 反过来读 chatStore",
+        "角色卡通过 chat/api + chatStore 直接开一场新对话，不需要 chat 的任何组件参与"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "数字最大的三条线",
+      "items": [
+        "constants 被 23 个文件引用，chat 一个 feature 就占 15 个：尺寸、素材、表情表都是纯数据，改一处十处生效",
+        "lib 被 9 个文件引用（画出 5 条），但 sse.ts 只被 chatStore 用，流式解析没有扩散到任何组件",
+        "components 被 11 个文件引用（画出 10 条），复用最多的是设置面板的 5 个文件"
+      ]
+    }
+  ]
+}

@@ -15,3 +15,5 @@ test-results
 CLAUDE.md
 AGENTS.md
 backend/app/data/*.json
+# archify 生成的图：HTML 内联渲染数据，JSON 是生成器的源描述，保持生成器原样输出
+docs/diagrams

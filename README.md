@@ -219,6 +219,7 @@ Render 免费实例 15 分钟无流量会休眠，第一次打开要等 30–60 
 | [docs/conventions.md](docs/conventions.md) | 五板斧、前后端目录与命名、中文注释规范（✅ ⚠️ 💡）、Git 约定                |
 | [docs/deploy.md](docs/deploy.md)           | Neon + Render + Vercel 分步部署与排查                                       |
 | [docs/interview.md](docs/interview.md)     | 面试讲稿：技术选型表、技术亮点、优化记录（实测数据）、问题排查、问答速查    |
+| [docs/frontend.md](docs/frontend.md)       | 前端项目文档：背景、技术栈、架构图、核心流程、难点与解决、优化点            |
 
 ## 致谢
 

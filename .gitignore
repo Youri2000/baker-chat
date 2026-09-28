@@ -1,9 +1,3 @@
-# >>> Comet managed project state >>>
-!/.comet/
-/.comet/*
-!/.comet/config.yaml
-# <<< Comet managed project state <<<
-
 # 参考用的旧项目，不进入仓库
 /endfield-baker-chat/
 /yuan-Chat/
@@ -39,3 +33,10 @@ test-results/
 # 后端本地数据库与打包元数据
 backend/data/
 backend/*.egg-info/
+# archify 生成图的截图与视觉校验报告只留在本机
+docs/diagrams/*.visual-check.*
+# >>> Comet managed project state >>>
+!/.comet/
+/.comet/*
+!/.comet/config.yaml
+# <<< Comet managed project state <<<

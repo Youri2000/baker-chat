@@ -1,0 +1,238 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "前端 SSE 流式回复数据流",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": "docs/diagrams/frontend-sse-dataflow.html",
+    "viewBox": [1080, 720]
+  },
+  "stages": [
+    { "label": "触发" },
+    { "label": "请求" },
+    { "label": "解码" },
+    { "label": "分发" },
+    { "label": "收尾" }
+  ],
+  "nodes": [
+    {
+      "id": "input",
+      "type": "frontend",
+      "label": "ChatInput",
+      "sublabel": "回车 / 点击发送",
+      "stage": 0,
+      "row": 0,
+      "width": 132,
+      "height": 44,
+      "tag": "用户输入"
+    },
+    {
+      "id": "store",
+      "type": "frontend",
+      "label": "sendMessage",
+      "sublabel": "乐观追加我方消息",
+      "stage": 0,
+      "row": 2,
+      "width": 132,
+      "height": 44,
+      "tag": "chatStore"
+    },
+    {
+      "id": "fetch",
+      "type": "frontend",
+      "label": "streamSse",
+      "sublabel": "/conversations/{id}/chat",
+      "stage": 1,
+      "row": 2,
+      "width": 132,
+      "height": 44,
+      "tag": "Bearer · SSE"
+    },
+    {
+      "id": "guard",
+      "type": "security",
+      "label": "assertOk",
+      "sublabel": "401 清 token 回登录页",
+      "stage": 1,
+      "row": 4,
+      "width": 132,
+      "height": 44,
+      "tag": "429 / 401"
+    },
+    {
+      "id": "decode",
+      "type": "frontend",
+      "label": "TextDecoder + 切行",
+      "sublabel": "takeCompletedLines()",
+      "stage": 2,
+      "row": 2,
+      "width": 132,
+      "height": 44,
+      "tag": "逐块读取"
+    },
+    {
+      "id": "bubbles",
+      "type": "frontend",
+      "label": "streaming.bubbles",
+      "sublabel": "每完整行一个临时气泡",
+      "stage": 3,
+      "row": 0,
+      "width": 132,
+      "height": 44,
+      "tag": "Zustand"
+    },
+    {
+      "id": "dispatch",
+      "type": "frontend",
+      "label": "dispatchLine",
+      "sublabel": "data: 前缀 → JSON.parse",
+      "stage": 3,
+      "row": 2,
+      "width": 132,
+      "height": 44,
+      "tag": "帧分发"
+    },
+    {
+      "id": "stop",
+      "type": "frontend",
+      "label": "stopGeneration",
+      "sublabel": "POST /chat/stop 后 abort()",
+      "stage": 3,
+      "row": 4,
+      "width": 132,
+      "height": 44,
+      "tag": "显式停止"
+    },
+    {
+      "id": "done",
+      "type": "frontend",
+      "label": "onDone · [DONE]",
+      "sublabel": "残行作为最后一个气泡",
+      "stage": 4,
+      "row": 2,
+      "width": 132,
+      "height": 44,
+      "tag": "流终止"
+    },
+    {
+      "id": "reload",
+      "type": "frontend",
+      "label": "getMessages 重拉",
+      "sublabel": "替换临时气泡",
+      "stage": 4,
+      "row": 4,
+      "width": 132,
+      "height": 44,
+      "tag": "落库对齐"
+    }
+  ],
+  "flows": [
+    {
+      "id": "enter-send",
+      "from": "input",
+      "to": "store",
+      "label": "sendMessage",
+      "classification": "用户输入",
+      "variant": "default",
+      "labelAt": [100, 186]
+    },
+    {
+      "id": "open-stream",
+      "from": "store",
+      "to": "fetch",
+      "label": "POST /chat",
+      "classification": "JSON 请求体",
+      "variant": "emphasis"
+    },
+    {
+      "id": "http-error",
+      "from": "fetch",
+      "to": "guard",
+      "label": "响应非 2xx",
+      "classification": "错误分支",
+      "variant": "security",
+      "labelAt": [315, 414]
+    },
+    {
+      "id": "read-body",
+      "from": "fetch",
+      "to": "decode",
+      "label": "getReader()",
+      "classification": "SSE 字节块",
+      "variant": "emphasis"
+    },
+    {
+      "id": "complete-lines",
+      "from": "decode",
+      "to": "dispatch",
+      "label": "完整行",
+      "classification": "完整行",
+      "variant": "emphasis"
+    },
+    {
+      "id": "delta-bubble",
+      "from": "dispatch",
+      "to": "bubbles",
+      "label": "onDelta(delta)",
+      "classification": "增量文本",
+      "variant": "emphasis",
+      "labelAt": [800, 264]
+    },
+    {
+      "id": "user-stop",
+      "from": "dispatch",
+      "to": "stop",
+      "label": "用户点停止",
+      "classification": "控制指令",
+      "variant": "dashed",
+      "labelAt": [790, 414]
+    },
+    {
+      "id": "stream-end",
+      "from": "dispatch",
+      "to": "done",
+      "label": "data: [DONE]",
+      "classification": "流终止标记",
+      "variant": "emphasis"
+    },
+    {
+      "id": "repull",
+      "from": "done",
+      "to": "reload",
+      "label": "流结束后重拉",
+      "classification": "持久化消息",
+      "variant": "emphasis",
+      "labelAt": [960, 414]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "主路径：一行文字到持久化消息",
+      "items": [
+        "sendMessage 先把我方消息乐观追加进 messagesByConversation，再发起 SSE 请求",
+        "后端每帧一个 data: {delta}，前端按换行切行，每个完整行立刻成为一个临时气泡",
+        "流结束后 getMessages 重拉，临时气泡与负数临时 id 一并被真实消息替换"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "两个切行边界都用同一个函数",
+      "items": [
+        "sse.ts 切的是 SSE 帧边界，chatStore 切的是气泡边界，两处都调用 takeCompletedLines",
+        "decode(value, { stream: true }) 把跨 chunk 的多字节字符留在解码器内部，避免乱码",
+        "未以换行结尾的残行存进 buffer / carry，拼到下一个 delta 再切"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "结束与停止都没有竞态",
+      "items": [
+        "[DONE] 后不调用 cancel()，只把剩余的流读完，避免 Chromium 记 net::ERR_ABORTED",
+        "stopGeneration 先 POST /chat/stop 等服务端落库，再 abort() 本地 fetch",
+        "因此走到重拉时服务端一定已落库，不会出现临时气泡与持久化消息并存的中间状态"
+      ]
+    }
+  ]
+}
