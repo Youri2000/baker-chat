@@ -108,10 +108,11 @@ data: [DONE]
 
 前端约定：
 
-- 用 `fetch` + `ReadableStream` + `TextDecoder('utf-8', {stream: true})` 解析，按 `\n` 切帧，未完成的尾部留在缓冲区
-- 收到 `delta` 后累积文本；每出现一个完整行（`\n`）就把该行（去掉首尾空白、跳过空行）显示为一个 AI 气泡；`[DONE]` 后剩余非空文本作为最后一个气泡（已请求停止时不显示，与后端丢弃半行一致）
-- 每次请求独立创建 `AbortController`；停止生成先 `POST …/chat/stop`（返回即代表已持久化），再 `abort()` 兜底结束本地 fetch，已显示的行保留
-- 流结束（`[DONE]`、错误、中断）后只重新拉取最新一页（`GET /messages`，默认 `limit`、不带 `before_id`），用持久化结果替换本地临时气泡和乐观显示的我方消息；已加载的更早历史（id 小于这一页第一条的消息）保留，与这一页合并，此时"是否还有更早的消息"沿用合并前的值（这一页的 `has_more` 只描述它自己之前，不能覆盖已加载到底的状态）；一次回复超过一页（这一页第一条比已加载的最后一条还新）时两段之间可能缺消息，只保留这一页并采用它的 `has_more`，缺的部分向上滚动时重新加载；`[DONE]` 与 stop 的响应都在后端落库之后才发出，所以这次重拉一定读到完整结果
+- 用 `fetch` + `ReadableStream` + `new TextDecoder('utf-8')` 与 `decode(chunk, {stream: true})` 解析，按 `\n` 切帧，未完成的尾部留在缓冲区
+- 收到 `delta` 后累积文本，按 `\n` 分行（去掉首尾空白、跳过空行，与后端落库规则一致），一行一个 AI 气泡。设置 `typewriter` 为 true（默认）时逐字写出：约每秒 40 字，积压时加快，正在写的内容最多落后网络约 1 秒；一行写完后停顿 0.5 秒（显示加载气泡）再写下一行，停顿不计入追赶；表情 token 整体出现；`[DONE]` 后剩余内容照常写完，写完才算回复结束。`typewriter` 为 false 或系统开启"减少动态效果"时，每凑满一整行就显示为一个气泡，`[DONE]` 后剩余非空文本作为最后一个气泡
+- 收到 `error` 帧时不再逐字：已收到的全部文本（包括最后一段没有换行的内容）立即按行显示，随后显示 `[错误: …]` 气泡，与后端出错时的落库内容一致
+- 每次请求独立创建 `AbortController`；停止生成时界面立即显示与落库一致的行（流未结束时只保留已收完整的行，半行消失；流已结束、只是还没写完时显示剩余全部行），流未结束才 `POST …/chat/stop`（返回即代表已持久化），再 `abort()` 兜底结束本地 fetch
+- 流结束（`[DONE]`、错误、中断）且内容全部显示后只重新拉取最新一页（`GET /messages`，默认 `limit`、不带 `before_id`），用持久化结果替换本地临时气泡和乐观显示的我方消息；已加载的更早历史（id 小于这一页第一条的消息）保留，与这一页合并，此时"是否还有更早的消息"沿用合并前的值（这一页的 `has_more` 只描述它自己之前，不能覆盖已加载到底的状态）；一次回复超过一页（这一页第一条比已加载的最后一条还新）时两段之间可能缺消息，只保留这一页并采用它的 `has_more`，缺的部分向上滚动时重新加载；`[DONE]` 与 stop 的响应都在后端落库之后才发出，所以这次重拉一定读到完整结果
 
 ## 4. 设置 `/api/settings`
 
@@ -123,18 +124,20 @@ interface Settings {
   world_setting_is_default: boolean;
   my_gender: 'male' | 'female'; // 默认 male
   strip_variant: 0 | 1 | 2; // 默认 0
+  typewriter: boolean; // AI 回复逐字输出（打字机），默认 true；只影响前端显示
   model: string; // 只读，来自后端环境变量
   daily_limit: number; // 只读
   daily_used: number; // 只读，今日已发送条数
 }
 ```
 
-| 方法  | 路径            | 请求体                                                                                              | 成功           |
-| ----- | --------------- | --------------------------------------------------------------------------------------------------- | -------------- |
-| GET   | `/api/settings` | —                                                                                                   | `200 Settings` |
-| PATCH | `/api/settings` | `Settings` 中 `temperature`、`max_tokens`、`world_setting`、`my_gender`、`strip_variant` 的任意子集 | `200 Settings` |
+| 方法  | 路径            | 请求体                                                                                                            | 成功           |
+| ----- | --------------- | ----------------------------------------------------------------------------------------------------------------- | -------------- |
+| GET   | `/api/settings` | —                                                                                                                 | `200 Settings` |
+| PATCH | `/api/settings` | `Settings` 中 `temperature`、`max_tokens`、`world_setting`、`my_gender`、`strip_variant`、`typewriter` 的任意子集 | `200 Settings` |
 
 - `world_setting` 传空字符串表示恢复默认
+- `typewriter` 列在 `user_settings` 建表之后才加入：旧库缺这一列时，后端启动时自动补上（`ALTER TABLE … DEFAULT TRUE`，已有用户为开启），部署无需手工执行 SQL
 
 ## 5. 角色提示词 `/api/prompts`
 

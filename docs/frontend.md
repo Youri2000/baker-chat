@@ -10,7 +10,7 @@
 
 ### 1.1 做什么
 
-"终末地 BAKER 会话消息"风格的角色聊天应用：登录后与 29 个内置角色对话，AI 回复**边生成边按行出现**，每一行是一个 SVG 聊天气泡，界面像素级还原游戏内的消息界面（1920×1080 设计画布）。
+"终末地 BAKER 会话消息"风格的角色聊天应用：登录后与 29 个内置角色对话，AI 回复**边生成边逐字写出**（打字机效果，可在设置里关闭），每一行是一个 SVG 聊天气泡，界面像素级还原游戏内的消息界面（1920×1080 设计画布）。
 
 线上地址：前端 <https://baker-chat-frontend.vercel.app>，后端 <https://baker-chat-api.onrender.com>（Render 免费实例会休眠，首次访问要等 30–60 秒），演示账号 `demo` / `demo123`。
 
@@ -30,13 +30,13 @@
 
 - 登录 / 注册 / 路由守卫 / 401 统一处理
 - 29 张角色主卡 + 会话子卡的列表（展开、折叠、选中、新建、删除）
-- 聊天区：SVG 气泡、按行流式渲染、停止生成、contenteditable 输入框 + 表情
+- 聊天区：SVG 气泡、逐字（打字机）流式渲染、停止生成、contenteditable 输入框 + 表情
 - 长会话：虚拟列表 + 消息游标分页、自动滚动与"回到底部 / 有新消息"按钮
 - 按需加载：聊天页与设置对话框拆成独立 chunk，可预取，代码已到时不进入 Suspense 兜底
 - 设置对话框六个标签页（AI 配置、世界观、角色提示词、数据管理、关于、免责声明）
 - 工程化：ESLint / Prettier / Vitest + RTL / Playwright E2E / husky + commitlint / CI
 
-规模：前端源码 5,197 行（`src/` 下 ts / tsx / css，不含测试、测试辅助与类型声明），测试 3,257 行，Vitest 24 个文件 152 个用例；后端 pytest 83 个用例，Playwright E2E 3 个用例。
+规模：前端源码 5,588 行（`src/` 下 ts / tsx / css，不含测试、测试辅助与类型声明），测试 3,936 行，Vitest 27 个文件 179 个用例；后端 pytest 86 个用例，Playwright E2E 4 个用例。
 
 ---
 
@@ -67,7 +67,7 @@
 
 ## 3. 架构图
 
-> 可交互的 HTML 版本在 `docs/diagrams/`：`baker-chat-architecture.html`（整体）、`frontend-module-dependencies.html`（前端模块）、`frontend-sse-dataflow.html`（SSE 数据流）。下面是能在 GitHub 上直接渲染的 Mermaid 版。
+> 可交互的 HTML 版本在 `docs/diagrams/`：`baker-chat-architecture.html`（整体）、`frontend-module-dependencies.html`（前端模块）、`frontend-sse-dataflow.html`（SSE 数据流）。下面是能在 GitHub 上直接渲染的 Mermaid 版。HTML 图生成于消息分页、虚拟列表与打字机之前（其中 SSE 数据流一张仍是旧的按行切分实现），以下方 Mermaid 为准。
 
 ### 3.1 系统整体
 
@@ -174,7 +174,8 @@ frontend/src/
 │   ├── chat/             ChatPage、loadChatPage（ChatPageLoader）、ChatArea、MessageList（虚拟列表）、
 │   │                     BackToBottomButton、ChatBubble、LoadingBubble、ChatInput、EmojiPop、
 │   │                     useChatAutoScroll（滚动规则）、useChatComposer（输入框编辑规则）、
-│   │                     chatRows（间距规则）、emojiHtml（token ↔ HTML）、chatStore（含分页合并 mergeLatest）、api
+│   │                     chatRows（间距规则）、emojiHtml（token ↔ HTML）、typewriter（打字机节奏的纯函数）、
+│   │                     chatStore（含分页合并 mergeLatest、回复显示驱动 createReplyDisplay）、api
 │   └── settings/         Toolbar、SettingsDialog + 6 个 Tab、DeleteConfirmDialog、settingsStore、api
 └── test/                 setup.ts（含 jsdom 下的 offsetWidth / offsetHeight 桩）、mockFetch.ts（fetch 桩与可逐帧推送的 SSE 桩）
 ```
@@ -273,7 +274,7 @@ sequenceDiagram
   participant V as MessageList / ChatBubble
 
   I->>C: submit → sendMessage("你好")
-  C->>C: 乐观追加我方消息（负数 id）<br/>streaming = {conversationId, bubbles:[], pending:true, controller}
+  C->>C: 乐观追加我方消息（负数 id）<br/>streaming = {conversationId, bubbles:[], typing:false, pending:true, controller}
   C-->>V: 立即渲染我方消息 + 加载气泡（14 ms）
   C->>S: streamSse(path, {text}, {signal, onDelta, onError, onDone})
   S->>B: fetch POST /conversations/{id}/chat
@@ -281,13 +282,13 @@ sequenceDiagram
     B-->>S: 任意大小的字节块
     S->>S: TextDecoder.decode(chunk, {stream:true})<br/>takeCompletedLines 切出完整的 data: 行
     S->>C: onDelta(delta)
-    C->>C: carry + delta 再按 \n 切行<br/>完整行 → pushBubbles，半行留在 carry
-    C-->>V: 每凑满一行追加一个临时气泡
+    C->>C: createReplyDisplay 累积全文<br/>typewriter.ts 的 readSource 按 \n 分行
+    C-->>V: 打字机：每 16 ms 推进，逐字更新正在写的临时气泡<br/>整行：每凑满一行追加一个临时气泡
   end
   B-->>S: data: [DONE]
-  S->>C: onDone：carry 里剩余文本作为最后一个气泡
+  S->>C: onDone：打字机把剩余内容照常写完<br/>整行把剩余文本作为最后一个气泡
   S-->>C: 读到流自然结束后返回
-  C->>C: pending = false（加载气泡消失，临时气泡保留）
+  C->>C: 内容全部显示后 pending = false（加载气泡消失，临时气泡保留）
   C->>B: GET /messages（只取最新一页）
   C->>C: 同一次 set：mergeLatest 合并已加载的更早历史<br/>+ streaming = null
   C-->>V: 持久化消息原位替换临时气泡（无闪烁）
@@ -305,29 +306,30 @@ data: [DONE]
 
 逐步说明：
 
-**① 为什么不用 `EventSource`**：`EventSource` 只能发 GET，不能自定义请求头；对话接口是带 JWT 的 POST。`@microsoft/fetch-event-source` 主要多了自动重连，而本项目的流是一次性的（见 4.4），不需要。最后手写 `fetch` + `ReadableStream` + `TextDecoder`，约 60 行，零依赖。
+**① 为什么不用 `EventSource`**：`EventSource` 只能发 GET，不能自定义请求头；对话接口是带 JWT 的 POST。`@microsoft/fetch-event-source` 主要多了自动重连，而本项目的流是一次性的（见 4.4），不需要。最后手写 `fetch` + `ReadableStream` + `TextDecoder`，`lib/sse.ts` 共 109 行（去掉注释与空行 74 行），零依赖。
 
-**② 两层"按行切分"**，用同一个函数 `takeCompletedLines(buffer)`，它返回 `{ lines, rest }`：
+**② 两层切分**：
 
-- 第一层在 `streamSse`：网络 chunk 的边界和 SSE 帧的边界没有关系，一帧 `data: …\n` 可能被切成两半，所以要缓冲到换行才解析。
-- 第二层在 `chatStore.sendMessage` 的 `onDelta`：AI 回复每行一个气泡，delta 的边界和回复里 `\n` 的边界也没有关系，未完成的半行放在闭包变量 `carry` 里。
+- 第一层在 `streamSse`：网络 chunk 的边界和 SSE 帧的边界没有关系，一帧 `data: …\n` 可能被切成两半，`takeCompletedLines(buffer)`（返回 `{ lines, rest }`）缓冲到换行才解析。
+- 第二层在 `typewriter.ts` 的 `readSource`：AI 回复每行一个气泡，delta 的边界和回复里 `\n` 的边界也没有关系。`chatStore.ts` 的 `createReplyDisplay` 累积全文，每次按与后端落库相同的规则分行（去首尾空白、跳过空行）；最后一段没有换行的是未收完的行，末尾若是半个表情 token（如 `[sns_em`）先不显示。
 
 **③ 多字节字符**：一个汉字在 UTF-8 里占 3 字节，可能跨两个 chunk。`decoder.decode(value, { stream: true })` 会把不完整的字节序列留在解码器内部，等下一块到了再拼。注意 `stream` 是 `decode()` 的第二个参数，不是构造函数的参数（写错了 `tsc` 会报错，见 [5.1](#51-sse-解析chunk-边界与多字节字符)）。
 
 **④ 状态设计**（`StreamingState`）：
 
-| 字段             | 含义                                                                             |
-| ---------------- | -------------------------------------------------------------------------------- |
-| `conversationId` | 回复属于哪个会话。用户中途切到别的会话，回复仍写回原会话，不会串台               |
-| `bubbles`        | 已经收完整的行，每行一个临时气泡                                                 |
-| `pending`        | "还会有新内容"，决定是否显示加载气泡；停止后、以及流结束到重拉完成之间为 `false` |
-| `controller`     | 这次请求专用的 `AbortController`                                                 |
+| 字段             | 含义                                                                                     |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| `conversationId` | 回复属于哪个会话。用户中途切到别的会话，回复仍写回原会话，不会串台                       |
+| `bubbles`        | 当前可见的行，每行一个临时气泡；打字机开启时最后一个可能是正在写的前缀                   |
+| `typing`         | 最后一个临时气泡还在写：`ChatBubble` 收到 `typing`，未写完的前缀不写尺寸缓存             |
+| `pending`        | 是否显示加载气泡：首个字前、行间停顿、等待下一行；内容全部显示后到重拉完成之间为 `false` |
+| `controller`     | 这次请求专用的 `AbortController`                                                         |
 
 全局只有一个 `streaming`，`sendMessage` 开头判断 `get().streaming !== null` 就直接返回，同一时刻只允许一条回复在进行。
 
-**⑤ 避免闭包里的旧状态**：`pushBubbles` 用 `set((s) => …)` 基于**最新**状态追加，不引用外层捕获的 `streaming` 对象。async 函数执行期间，store 可能已被停止或 `reset()` 改过，捕获的对象是旧的。
+**⑤ 避免闭包里的旧状态**：显示驱动写 store 时用 `set((s) => …)` 基于**最新**状态更新，并先比对本次回复自己的 `AbortController`，不引用外层捕获的 `streaming` 对象。async 函数执行期间，store 可能已被停止或 `reset()` 改过，甚至已经开始了下一条回复，捕获的对象是旧的。
 
-**⑥ 结束时用持久化消息替换临时气泡**：流结束后只重拉最新一页（`GET /messages` 不带 `before_id`，默认 50 条），用 `chatStore.ts` 的 `mergeLatest` 与已加载的更早历史合并：两段重叠时保留这一页之前的历史（`has_more` 沿用合并前的值），乐观显示的负数 id 消息丢掉；一次回复超过一页（这一页第一条比已加载的最后一条还新）时两段之间可能缺消息，只保留这一页，更早的向上滚动时重新加载。合并结果和 `streaming: null` 写在**同一次 `set`** 里。如果分两次 `set`，中间会有一帧"临时气泡 + 持久化消息"同时存在，同一段回复显示两遍。能放心在这里重拉，是因为后端在 `finally` 落库之后才发 `[DONE]`，前端收到 `[DONE]` 时数据已经在库里。分页接口见 [api.md](api.md) §2。
+**⑥ 结束时用持久化消息替换临时气泡**：流结束、且内容全部显示（打字机写完）后只重拉最新一页（`GET /messages` 不带 `before_id`，默认 50 条），用 `chatStore.ts` 的 `mergeLatest` 与已加载的更早历史合并：两段重叠时保留这一页之前的历史（`has_more` 沿用合并前的值），乐观显示的负数 id 消息丢掉；一次回复超过一页（这一页第一条比已加载的最后一条还新）时两段之间可能缺消息，只保留这一页，更早的向上滚动时重新加载。合并结果和 `streaming: null` 写在**同一次 `set`** 里。如果分两次 `set`，中间会有一帧"临时气泡 + 持久化消息"同时存在，同一段回复显示两遍。能放心在这里重拉，是因为后端在 `finally` 落库之后才发 `[DONE]`，前端收到 `[DONE]` 时数据已经在库里。分页接口见 [api.md](api.md) §2。
 
 **⑦ 收到 `[DONE]` 后不调用 `reader.cancel()`**，而是继续 `read()` 直到 `done`。主动取消会被 Chromium 记成 `net::ERR_ABORTED`，Network 面板每次回复都有一条红色的失败请求（[5.9](#59-每次回复结束network-面板都有一条失败的-chat-请求)）。
 
@@ -336,19 +338,21 @@ data: [DONE]
 **⑨ 错误**：
 
 - 非 2xx（例如 429 今日额度已用完）：`streamSse` 抛 `ApiError`，`sendMessage` 的 catch 里 toast。后端没保存这条用户消息，重拉后乐观追加的消息自然消失。
-- 流中途上游出错：后端发 `data: {"error": …}`，前端追加一个 `[错误: …]` 气泡，随后照常收到 `[DONE]` 并重拉。
+- 流中途上游出错：后端发 `data: {"error": …}`，前端不再逐字，立即按行显示已收到的全部文本（包括最后一段没有换行的内容，与后端出错时的落库一致），再追加一个 `[错误: …]` 气泡，随后照常收到 `[DONE]` 并重拉。
+
+**⑩ 打字机**（`typewriter.ts` 的纯函数 + `chatStore.ts` 的 `createReplyDisplay`）：打字机开启时（默认，设置"AI 配置"里可关闭，系统"减少动态效果"时一律整行显示），驱动每 16 ms 用 `step` 推进一次进度：平时约每秒 40 字，积压越多写得越快，正在写的内容最多落后网络约 1 秒；一行写完后固定停顿 0.5 秒（显示加载气泡）再写下一行，停顿不计入追赶；表情 token 作为一个整体出现。流结束后剩余内容照常写完，写完前仍显示停止按钮；停止时立即显示与落库一致的行（流未结束只保留已收完整的行，半行消失），错误帧时立即显示已收到的全部文本与错误气泡。可见内容没变就不写 store；已写完的气泡在后续逐字过程中不重渲染（`memo`，度量见 [interview.md#typewriter](interview.md#typewriter)）。
 
 ### 4.4 "重连"：断线与恢复（本项目不自动重连）
 
 **真实情况**：SSE 流断开后**不会自动重连续传**。这是有意的取舍：后端的一次生成和这条 HTTP 连接绑在一起，连接断了生成就结束，没有可以"接上"的东西。项目里处理的是"断了之后数据要一致"，以及几种相关的恢复场景：
 
-| 场景                              | 实际行为                                                                                                                                                                                                     |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 用户关标签页 / 刷新               | 后端察觉断开后取消生成器，`finally` 里把**已完成的行**存成 `aborted` 状态，丢掉半行。再次打开会话时 `selectConversation` 重拉最新一页，看到的就是这些行                                                      |
-| 流中途网络断开                    | `reader.read()` 抛 `TypeError`，`sendMessage` 的 catch 里 toast，然后照常 `pending = false` 并尝试重拉；网络还没恢复时重拉也失败，toast 后清掉 `streaming`，临时气泡消失。下次选中会话时会重新拉取服务端结果 |
-| token 过期                        | 任意请求 401 → 清登录态 → 跳登录页；没有 refresh token，要重新登录（token 有效期 7 天）                                                                                                                      |
-| 后端冷启动（Render 免费实例休眠） | 第一次请求要等 30–60 秒，没有专门的重试或"唤醒中"提示；演示前先访问一次 `/health`                                                                                                                            |
-| 另一个标签页退出                  | 本页下一次请求 401，同样回到登录页（[5.6](#56-多标签页退出401-被当成普通错误)）                                                                                                                              |
+| 场景                              | 实际行为                                                                                                                                                                                                                        |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 用户关标签页 / 刷新               | 后端察觉断开后取消生成器，`finally` 里把**已完成的行**存成 `aborted` 状态，丢掉半行。再次打开会话时 `selectConversation` 重拉最新一页，看到的就是这些行                                                                         |
+| 流中途网络断开                    | `reader.read()` 抛 `TypeError`，`sendMessage` 的 catch 里 toast，按停止收尾（只保留已收完整的行，加载气泡消失）并尝试重拉；网络还没恢复时重拉也失败，toast 后清掉 `streaming`，临时气泡消失。下次选中会话时会重新拉取服务端结果 |
+| token 过期                        | 任意请求 401 → 清登录态 → 跳登录页；没有 refresh token，要重新登录（token 有效期 7 天）                                                                                                                                         |
+| 后端冷启动（Render 免费实例休眠） | 第一次请求要等 30–60 秒，没有专门的重试或"唤醒中"提示；演示前先访问一次 `/health`                                                                                                                                               |
+| 另一个标签页退出                  | 本页下一次请求 401，同样回到登录页（[5.6](#56-多标签页退出401-被当成普通错误)）                                                                                                                                                 |
 
 **为什么不做**：遵守项目的"五板斧"约定，不为没出现的需求提前设计。流是一次性的，接上重连需要把后端改成"生成与连接解耦"，改动很大，而一轮回复通常 1 秒左右就结束（真实 DeepSeek 全文中位数 1045 ms）。
 
@@ -362,7 +366,7 @@ data: [DONE]
 
 ### 4.5 取消（停止生成）
 
-需求：点"停止"后，已显示的气泡保留，未完成的半行丢弃，刷新后看到的内容和停止时一样。
+需求：点"停止"后，已显示的气泡保留（打字机开启时，已收完整但还没写出的行也立即完整显示），未完成的半行丢弃，刷新后看到的内容和停止时一样。
 
 ```mermaid
 sequenceDiagram
@@ -372,7 +376,7 @@ sequenceDiagram
   participant S as streamSse
 
   U->>C: stopGeneration()
-  C->>C: pending = false（加载气泡立刻消失，也挡住重复点击）
+  C->>C: 显示驱动立即收成与落库一致的行，pending = false<br/>activeReply 置空挡住重复点击；流已结束只是没写完时到此为止
   C->>B: POST /chat/stop
   B->>B: stop 事件置位 → 生成器停止<br/>finally：已完成的行存为 aborted，丢半行<br/>finished 置位
   B-->>S: data: [DONE]，关闭流
@@ -397,12 +401,12 @@ sequenceDiagram
 **前端细节**：
 
 - **先 stop 再 abort**。如果先 abort，后端多半在收到 stop 之前就察觉断开并注销了这条流的登记，stop 几乎总返回 `stopped: false`，接口语义就含糊了。
-- `pending = false` 同时起两个作用：加载气泡立刻消失；`stopGeneration` 开头判断 `!streaming.pending` 就返回，连点只发一次 stop。
-- `onDone` 只在 `pending` 仍为 `true` 时才把 `carry` 里的半行显示为最后一个气泡。停止时后端丢掉了半行，前端也不显示，两边一致。
-- 没有新增 `stopping` 字段。"pending 但正在停止"是不该存在的状态组合，把 `pending` 的含义定为"还会有新内容"就够了。
+- `stopGeneration` 取出当前回复的显示驱动（`activeReply`）后立即置空：连点第二次拿不到驱动就直接返回，只发一次 stop。
+- 驱动的 `stop()` 立即把界面收成与落库一致的内容：流还没结束时，已收完整的行（包括正在写和还没写到的）全部立即完整显示，只有还没收到换行的最后一段消失（后端同样丢掉这半行）；流已经结束、只是打字机还没写完时，剩余的行全部立即显示，而且不再 `POST /chat/stop`（服务端已落库，没有要停的流）。之后到达的内容与 `[DONE]` 都被驱动忽略。
+- 没有新增 `stopping` 字段：`pending` 只表示是否显示加载气泡（首个字前、行间停顿、等下一行），回复是否在进行看 `streaming` 是否为空，是否已经停止由驱动自己记着。
 - abort 的两条路径：真实 `fetch` 被 abort 时 `read()` 以 `AbortError` 拒绝，catch 里看到 `signal.aborted` 就静默返回；测试里手写的桩流不认识 signal，`read()` 仍会返回数据，所以每次读到数据后先检查 `signal.aborted`。
 
-**退出登录时的取消**：`logout` → `resetUserData()` → 登记表里的 `chatStore.reset()` → `streaming.controller.abort()` 并回到初始状态。`sendMessage` 在流结束后看到 `streaming === null` 就不再重拉，避免旧用户的消息写进新用户的 store。这条路径不调 stop 接口，服务端靠察觉断开来落库。
+**退出登录时的取消**：`logout` → `resetUserData()` → 登记表里的 `chatStore.reset()` → 取消回复的显示驱动、`streaming.controller.abort()` 并回到初始状态。`sendMessage` 收尾时发现 `streaming` 已不属于本次回复（为空，或已换成 reset 之后新回复的 `controller`）就不再重拉、也不写 store，避免旧用户的消息写进新用户的 store。这条路径不调 stop 接口，服务端靠察觉断开来落库。
 
 **验证**：`chatStore.test.tsx` 断言请求顺序为 `['messages', 'chat', 'chat/stop', 'messages']` 且半行不显示；`stopped=false` 时靠 abort 结束；重复调用只 POST 一次。真实浏览器里 stop 52 ms 返回，64 ms 后发送按钮恢复，刷新后 6 条消息一致。
 
@@ -458,7 +462,7 @@ textarea 没法在文字中间显示图片，所以用 contenteditable，随之�
 | Alt+Enter 把消息发了出去                           | 原实现只把 Shift / Ctrl / Cmd + Enter 当换行       | 修饰键判断补上 `altKey`                                                                                              |
 | 回复期间，仍开着的表情弹层能把表情插进禁用的输入框 | 输入框不可编辑、表情按钮禁用，但已打开的弹层还能点 | Hook 接收 `disabled`，`submit` 与 `insertEmoji` 在禁用时都不生效                                                     |
 
-验证：E2E 断言后端存储的文本正好是 `'第一行\n第二行[sns_emoji_001]'`；`useChatComposer.test.tsx` 12 个用例覆盖 Enter / 四种组合键 / 输入法 / 空白 / 粘贴 / 表情插入与序列化 / 失焦后插到末尾 / 禁用时不生效，`ChatInput.test.tsx` 5 个用例只测接线（jsdom 没有 `execCommand`，测试里用桩代替）。
+验证：E2E 断言后端存储的文本正好是 `'第一行\n第二行[sns_emoji_001]'`；`useChatComposer.test.tsx` 12 个用例覆盖 Enter / 四种组合键 / 输入法 / 空白 / 粘贴 / 表情插入与序列化 / 失焦后插到末尾 / 禁用时不生效，`ChatInput.test.tsx` 6 个用例只测接线，含把打字机开关传给 `sendMessage`（jsdom 没有 `execCommand`，测试里用桩代替）。
 
 ### 5.6 多标签页退出，401 被当成普通错误
 
@@ -474,7 +478,7 @@ textarea 没法在文字中间显示图片，所以用 contenteditable，随之�
 - **现象**：A 退出后注册 B，在 B 的数据到达之前，主页显示的是 A 的会话展开状态、预览和聊天条样式；A 没结束的回复流在结束后重拉，还会把 A 的消息写回 store。
 - **定位**：用 Playwright 路由拦截，把 B 的 `GET /conversations` 延迟 2 s、`GET /settings` 延迟 6 s，把时间窗口放大到肉眼可见。
 - **根因**：`logout` 只清了 token 和 user，另外两个 store 的数据留在内存里，等着被下一次加载覆盖；`sendMessage` 流结束后无条件重拉。
-- **解决**：`resetUserData()` 在四处调用（见 4.1）；`chatStore.reset()` 同步中止进行中的流并回到初始状态；`sendMessage` 重拉前后都检查 `streaming === null`。
+- **解决**：`resetUserData()` 在四处调用（见 4.1）；`chatStore.reset()` 同步中止进行中的流并回到初始状态；`sendMessage` 写回与重拉前后都比对本次回复自己的 `AbortController`：`streaming` 为空，或已换成 reset 之后新回复的 controller，就不写 store、不重拉。
 - **验证**：`authStore.test.ts`、`chatStore.test.tsx`、`settingsStore.test.ts` 各有用例；真实浏览器里 A 的预览出现 0 次。
 
 ### 5.8 连点设置时的 PATCH 竞态
@@ -494,7 +498,7 @@ textarea 没法在文字中间显示图片，所以用 contenteditable，随之�
 
 > 这一条是之前被问住的问题（"为什么没用 immer？用 immer 会更好吗？"），事后专门做了对比实验。
 
-**Context + useReducer**：Context 的值一变，所有消费它的组件都重渲染。流式期间 `streaming` 每来一行就变一次，放进 Context 会把 29 张主卡和全部子卡一起带着重渲染；拆成多个 Context 又要自己写选择器。
+**Context + useReducer**：Context 的值一变，所有消费它的组件都重渲染。流式期间 `streaming` 变得很频繁（打字机开启时约每 16 ms 写出新字就变一次，整行模式每来一行变一次），放进 Context 会把 29 张主卡和全部子卡一起带着重渲染；拆成多个 Context 又要自己写选择器。
 
 **Redux Toolkit**：3 个 store 用不上 slice、thunk、Provider 这一套样板代码。
 
@@ -513,7 +517,7 @@ textarea 没法在文字中间显示图片，所以用 contenteditable，随之�
 | 包体积                            | +0                 | 约 +3.8 KB gzip |
 | 函数式 updater 返回值的类型检查   | 有                 | 没有            |
 
-行数是实验当时的快照；之后加入历史消息分页，`chatStore.ts` 现为 397 行。
+行数是实验当时的快照；之后加入历史消息分页与打字机的显示驱动，`chatStore.ts` 现为 556 行。
 
 - **更新都很浅**：最深只改到某个会话的 `last_message`，每处一行展开，immer 几乎不省代码。
 - **类型检查变弱**：immer 中间件把 updater 声明成返回 `void`，返回了字段写错的对象 `tsc` 也不报错（实测过）。
@@ -563,21 +567,22 @@ textarea 没法在文字中间显示图片，所以用 contenteditable，随之�
 
 ### 6.1 汇总
 
-| 优化项                                | 优化前               | 优化后                                                  | 幅度                    | 方法                                                            |
-| ------------------------------------- | -------------------- | ------------------------------------------------------- | ----------------------- | --------------------------------------------------------------- |
-| 字体文件                              | 4,319,844 B          | 928,912 B                                               | −78.5%                  | fontTools 子集化                                                |
-| 前端产物合计                          | 5,338.0 KB（Vue 版） | 1,656.6 KB（2026-09-24；本次按需加载改动后 1,691.9 KB） | −69.0%（改动后 −68.3%） | 字体子集 + 提示词移后端 + 去依赖                                |
-| 前端 JS                               | 722.8 KB             | 358.2 KB（2026-09-24；本次改动后三个文件共 393.1 KB）   | −50.4%（改动后 −45.6%） | 提示词移后端，去 jszip 等 3 个依赖                              |
-| 入口 JS（gzip，Vite 报告）            | 133.41 kB（唯一 JS） | 88.24 kB                                                | −33.9%                  | 聊天页 / 设置对话框按需加载 + 预取                              |
-| 流式期间 ChatBubble 重渲染            | 348 次               | 11 次                                                   | 约 1/32                 | `memo` + 原始值 props + 稳定的行 key（虚拟列表后重测 146 → 12） |
-| 打开 2000 条会话（4× 降速）           | 1063.2 ms            | 80 ms                                                   | −92.5%                  | 消息游标分页（每页 50 条）+ 虚拟列表                            |
-| 打开时的消息 JSON（2000 条）          | 421.3 KB             | 11.3 KB                                                 | —                       | 打开会话只取最近 50 条                                          |
-| 聊天区元素（2000 条，加载全部历史后） | 17,931               | 119                                                     | −99.3%                  | 虚拟列表只渲染可视区附近的行                                    |
-| 滚动帧 p95（2000 条，4× 降速）        | 91.1 ms              | 24 ms                                                   | 超过 33 ms 的帧 562 → 8 | 虚拟列表                                                        |
-| hover 时的 React 渲染                 | 每次移动都渲染       | 0 次                                                    | —                       | CSS `:hover` + `group` 变体                                     |
-| 首个 AI 气泡（真实 DeepSeek）         | 5017 ms              | 751 ms                                                  | −85%                    | 关闭 DeepSeek 思考模式                                          |
-| 流式按行 vs 等全文                    | 1045 ms 看到首句     | 751 ms 看到首句                                         | 提前 294 ms             | 按 `\n` 分段，每行一个气泡                                      |
-| 第 60 条消息的 prompt tokens          | 约 7100（外推估算）  | 5704（实测）                                            | 约 −20%                 | 后端只带最近 40 条上下文                                        |
+| 优化项                                | 优化前               | 优化后                                                               | 幅度                    | 方法                                                            |
+| ------------------------------------- | -------------------- | -------------------------------------------------------------------- | ----------------------- | --------------------------------------------------------------- |
+| 字体文件                              | 4,319,844 B          | 928,912 B                                                            | −78.5%                  | fontTools 子集化                                                |
+| 前端产物合计                          | 5,338.0 KB（Vue 版） | 1,656.6 KB（2026-09-24；2026-09-28 按需加载改动后 1,691.9 KB）       | −69.0%（改动后 −68.3%） | 字体子集 + 提示词移后端 + 去依赖                                |
+| 前端 JS                               | 722.8 KB             | 358.2 KB（2026-09-24；2026-09-28 按需加载改动后三个文件共 393.1 KB） | −50.4%（改动后 −45.6%） | 提示词移后端，去 jszip 等 3 个依赖                              |
+| 入口 JS（gzip，Vite 报告）            | 133.41 kB（唯一 JS） | 88.24 kB                                                             | −33.9%                  | 聊天页 / 设置对话框按需加载 + 预取                              |
+| 流式期间 ChatBubble 重渲染            | 348 次               | 11 次                                                                | 约 1/32                 | `memo` + 原始值 props + 稳定的行 key（虚拟列表后重测 146 → 12） |
+| 打字机逐字写出期间已写完气泡的重渲染  | 413 次（去掉 memo）  | 0 次                                                                 | —                       | `memo` + 原始值 props（含 `typing`）；可见内容没变就不写 store  |
+| 打开 2000 条会话（4× 降速）           | 1063.2 ms            | 80 ms                                                                | −92.5%                  | 消息游标分页（每页 50 条）+ 虚拟列表                            |
+| 打开时的消息 JSON（2000 条）          | 421.3 KB             | 11.3 KB                                                              | —                       | 打开会话只取最近 50 条                                          |
+| 聊天区元素（2000 条，加载全部历史后） | 17,931               | 119                                                                  | −99.3%                  | 虚拟列表只渲染可视区附近的行                                    |
+| 滚动帧 p95（2000 条，4× 降速）        | 91.1 ms              | 24 ms                                                                | 超过 33 ms 的帧 562 → 8 | 虚拟列表                                                        |
+| hover 时的 React 渲染                 | 每次移动都渲染       | 0 次                                                                 | —                       | CSS `:hover` + `group` 变体                                     |
+| 首个 AI 气泡（真实 DeepSeek）         | 5017 ms              | 751 ms                                                               | −85%                    | 关闭 DeepSeek 思考模式                                          |
+| 流式按行 vs 等全文（整行显示时测得）  | 1045 ms 看到首句     | 751 ms 看到首句                                                      | 提前 294 ms             | 按 `\n` 分段，每行一个气泡                                      |
+| 第 60 条消息的 prompt tokens          | 约 7100（外推估算）  | 5704（实测）                                                         | 约 −20%                 | 后端只带最近 40 条上下文                                        |
 
 ### 6.2 字体子集化
 
@@ -590,14 +595,15 @@ textarea 没法在文字中间显示图片，所以用 contenteditable，随之�
 
 - **测量**：`rerender.measure.test.tsx`，用 `<Profiler>` 包住 `<ChatArea>`，20 条历史消息，推 30 帧 delta（组成 10 行），`vi.mock` 把 `ChatBubble` 换成计数包装，对照组只差一个 `memo`。
 - **结果**（引入虚拟列表前）：两组 commit 都是 14 次；不加 `memo` 时每次 commit 都重跑全部气泡，共 348 次；加 `memo` 后只有 11 次（我方消息 1 次 + 10 个新气泡各挂载 1 次）。
-- **为什么 memo 有效**：`ChatBubble` 的 props（`side`、`text`、`animate`）都是原始值，浅比较能命中；如果传的是每次新建的对象或内联函数，`memo` 就没用了。
+- **为什么 memo 有效**：`ChatBubble` 的 props（`side`、`text`、`animate`，以及打字机加入的 `typing`）都是原始值，浅比较能命中；如果传的是每次新建的对象或内联函数，`memo` 就没用了。
 - **为什么差距会越来越大**：不加 memo 时每来一行都要重渲染已有的所有行，代价随对话长度线性增长。
 - **引入虚拟列表后（2026-09-28 重测）**：commit 26 次（两组相同）；ChatBubble 渲染 memo 版挂载 7 + 发送到重拉完成 12，对照版挂载 14 + 146。挂载的第一次提交只渲染末尾附近的行，所以挂载数小于 20；多出来的提交来自虚拟列表的测量回调（新行挂载后被测量，测量结果变化让列表再提交一次），memo 让这些提交里的已有气泡照样跳过；对照版变少是因为每次提交只重跑已渲染的行，不再是全部行。用例断言相应放宽为"挂载渲染 ≤ 20"。
+- **加入打字机后（2026-09-29）**：这个用例以整行模式运行（`sendMessage(text, false)`），数字不变；同一文件的第二个用例测打字机开启时的渲染：已写完的行再次渲染 memo 版 0 次、对照版 413 次，见 `docs/notes/measurements.md` 第 11.1 节。
 - **说明**：jsdom 里 `ResizeObserver` 是桩，真实浏览器中每个新气泡还会因测量回调多渲染 1 次，两组各 +11，比例不变（引入虚拟列表前的推算）。jsdom 没有布局，测试环境让 `offsetHeight` 返回内联 style 的高度（`src/test/setup.ts`），否则虚拟列表一行都不渲染。
 
 ### 6.4 产物体积：−69%
 
-下表是 2026-09-24（提交 5fcec89，字体子集化、提示词移到后端之后）的数据。本次按需加载改动前后用同一脚本对两边实际构建（改动前为 `git archive` 导出的 HEAD 6f2055b）：JS 359.0 → 393.1 KB（gzip 130.3 → 142.2 KB，拆成入口 267.8 KB、聊天页 110.7 KB、设置对话框 14.6 KB 三个文件），产物合计 1,657.4 → 1,691.9 KB（比 Vue 版 −68.3%）；JS 多出的 34.1 KB 来自虚拟列表库与新增代码，首屏只下载入口，见 [6.6](#66-按需加载)；分类明细见 `docs/notes/measurements.md` 第 10.3 节。
+下表是 2026-09-24（提交 5fcec89，字体子集化、提示词移到后端之后）的数据。2026-09-28 按需加载改动前后用同一脚本对两边实际构建（改动前为 `git archive` 导出的 HEAD 6f2055b）：JS 359.0 → 393.1 KB（gzip 130.3 → 142.2 KB，拆成入口 267.8 KB、聊天页 110.7 KB、设置对话框 14.6 KB 三个文件），产物合计 1,657.4 → 1,691.9 KB（比 Vue 版 −68.3%）；JS 多出的 34.1 KB 来自虚拟列表库与新增代码，首屏只下载入口，见 [6.6](#66-按需加载)；分类明细见 `docs/notes/measurements.md` 第 10.3 节。
 
 | 类别 | Vue 版    | React 版  | 差值                                                                          |
 | ---- | --------- | --------- | ----------------------------------------------------------------------------- |
@@ -615,7 +621,7 @@ textarea 没法在文字中间显示图片，所以用 contenteditable，随之�
 - **定位**：绕过前后端直接请求上游，逐帧记录类型和时间：模型默认开启"思考模式"，思考内容占满了 token 预算，正文要等思考结束后才一次性到达（28 个 delta 在 3 ms 内到齐）。
 - **解决**：后端请求体加 `thinking: {"type": "disabled"}`。角色闲聊不需要推理。
 - **结果**：首个气泡 751 ms，全文 1045 ms，首句比"等全文再显示"早 294 ms；回复越长，提前越多。
-- 这一项改的是后端参数，但问题是从前端的首屏指标发现的：前端自己的链路（Enter → 加载气泡 14 ms，mock 下首个气泡 168 ms）一直很快，要分清楚慢在哪一段，才知道该改哪里。
+- 这一项改的是后端参数，但问题是从前端的首屏指标发现的：前端自己的链路（Enter → 加载气泡 14 ms，mock 下首个气泡 168 ms，整行显示时测得）一直很快，要分清楚慢在哪一段，才知道该改哪里。
 
 ### 6.6 按需加载
 
@@ -629,13 +635,13 @@ textarea 没法在文字中间显示图片，所以用 contenteditable，随之�
 - **踩过的坑**：只开 `React.lazy` + 提前 `import()` 时，已登录刷新 26 → 335 ms、打开设置约 300 ms。`React.lazy` 第一次渲染总会挂起一次（模块 Promise 要等微任务才兑现），同步更新里一挂起就提交兜底，React 19 又让兜底至少停留 300 ms；"预取"只让下载提前，没让组件跳过挂起。
 - **结果**（`chat-perf.mjs --lazy`，新浏览器上下文、禁用缓存，5 次中位数）：
 
-| 指标                             | 改动前               | 改动后                                                  |
-| -------------------------------- | -------------------- | ------------------------------------------------------- |
-| 入口 JS gzip（Vite 报告）        | 133.41 kB（唯一 JS） | 88.24 kB（−33.9%；聊天页 chunk 51.68 kB、设置 5.66 kB） |
-| 无限速：已登录刷新 → 聊天页挂载  | 26.2 ms              | 23.9 ms                                                 |
-| 无限速：点击设置 → 对话框出现    | 4.5 ms               | 4.5 ms                                                  |
-| 慢速 4G：`/login` 首次内容绘制   | 1080 ms              | 860 ms                                                  |
-| 慢速 4G：已登录刷新 → 聊天页挂载 | 1069.7 ms            | 1104.9 ms（不加 `modulepreload` 时 1345.6 ms）          |
+| 指标                             | 改动前               | 改动后                                                                                            |
+| -------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------- |
+| 入口 JS gzip（Vite 报告）        | 133.41 kB（唯一 JS） | 88.24 kB（−33.9%；聊天页 chunk 51.68 kB、设置 5.66 kB；加入打字机后为 52.90 / 5.76 kB，入口不变） |
+| 无限速：已登录刷新 → 聊天页挂载  | 26.2 ms              | 23.9 ms                                                                                           |
+| 无限速：点击设置 → 对话框出现    | 4.5 ms               | 4.5 ms                                                                                            |
+| 慢速 4G：`/login` 首次内容绘制   | 1080 ms              | 860 ms                                                                                            |
+| 慢速 4G：已登录刷新 → 聊天页挂载 | 1069.7 ms            | 1104.9 ms（不加 `modulepreload` 时 1345.6 ms）                                                    |
 
 - **代价**：已登录刷新下载的 JS 总量 130.6 → 143.0 KB（虚拟列表库与新代码，以及预取的设置对话框 chunk），换来登录页更快；chunk 加载失败没有处理（[6.10](#610-还能继续优化的地方未做)）；内联脚本里的 token 键名与 `lib/http.ts` 各写一份。详见 [interview.md#lazy-preload](interview.md#lazy-preload)、[interview.md#entry-chunk](interview.md#entry-chunk)。
 
@@ -706,13 +712,13 @@ textarea 没法在文字中间显示图片，所以用 contenteditable，随之�
 
 ## 7. 测试与工程化（简表）
 
-| 层级     | 工具                   | 数量             | 覆盖                                                                                                                |
-| -------- | ---------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------- |
-| 单元     | Vitest + RTL + jsdom   | 24 文件 152 用例 | SSE 解析、按行分段、间距规则、表情互转、表单、守卫、三个 store、分页合并、两个 Hook（自动滚动、输入框）、重渲染度量 |
-| 后端     | pytest + respx         | 83 用例          | 鉴权、隔离、截断、额度、四种结束方式、消息分页                                                                      |
-| E2E      | Playwright（chromium） | 3 用例           | 注册 → 选角色 → 发消息 → 3 个气泡逐行出现 → 查 API 与刷新；守卫 + 登录 + 退出；长会话的滚动、虚拟列表与分页         |
-| 静态检查 | ESLint / tsc           | —                | `--max-warnings=0`，含 jsdoc 规则                                                                                   |
-| CI       | GitHub Actions         | 3 个 job         | frontend / backend / e2e，命令与本地脚本逐字相同                                                                    |
+| 层级     | 工具                   | 数量             | 覆盖                                                                                                                                            |
+| -------- | ---------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| 单元     | Vitest + RTL + jsdom   | 27 文件 179 用例 | SSE 解析、按行分段、打字机节奏、间距规则、表情互转、表单、守卫、三个 store、分页合并、两个 Hook（自动滚动、输入框）、重渲染度量                 |
+| 后端     | pytest + respx         | 86 用例          | 鉴权、隔离、截断、额度、四种结束方式、消息分页、设置字段与启动补列                                                                              |
+| E2E      | Playwright（chromium） | 4 用例           | 注册 → 选角色 → 发消息 → 3 个气泡逐字写出 → 查 API 与刷新；打字机逐字过程与关闭开关后整行出现；守卫 + 登录 + 退出；长会话的滚动、虚拟列表与分页 |
+| 静态检查 | ESLint / tsc           | —                | `--max-warnings=0`，含 jsdoc 规则                                                                                                               |
+| CI       | GitHub Actions         | 3 个 job         | frontend / backend / e2e，命令与本地脚本逐字相同                                                                                                |
 
 jsdom 没有布局引擎，所以布局类问题（5.3 的 `max-width`、5.4 的气泡尺寸、坐标还原）都靠 Playwright 在真实 Chromium 里用 `getBoundingClientRect` 与设计稿常量逐项比对，误差 ≤ 0.02 px。虚拟列表在 jsdom 里要靠 `src/test/setup.ts` 让 `offsetWidth` / `offsetHeight` 返回内联 style 的宽高才会渲染行；滚动行为（停在底部、暂停跟随、加载更早历史后位置不动）由 `e2e/tests/scroll.spec.ts` 在真实浏览器里断言。
 
@@ -721,7 +727,7 @@ jsdom 没有布局引擎，所以布局类问题（5.3 的 `max-width`、5.4 的
 ## 8. 面试速答
 
 1. **为什么不用 EventSource？** 只能 GET、不能带 `Authorization` 头，对话接口是带 JWT 的 POST。
-2. **流式数据怎么变成一行行气泡？** 两层行缓冲：先按 `\n` 切出完整的 SSE 帧，再把回复文本按 `\n` 切成气泡行，半行留在缓冲区；`TextDecoder` 的 `stream: true` 处理跨块的汉字。
+2. **流式数据怎么变成一行行气泡？** 两层切分：先用 `takeCompletedLines` 按 `\n` 切出完整的 SSE 帧，再由 `typewriter.ts` 的 `readSource` 把回复文本按 `\n` 分成气泡行；打字机开启时正在写的那一行逐字出现（行间停顿 0.5 秒），关闭时凑满一行才出一个气泡；`TextDecoder` 的 `stream: true` 处理跨块的汉字。
 3. **停止生成怎么保证数据一致？** 先调 `POST /chat/stop`，后端落库后才返回，再 `abort()` 兜底，最后重拉。第一版"abort 后立刻重拉"会读到空结果，是真实遇到的 bug。
 4. **断线了怎么办？** 不自动重连，后端把已完成的行存下来，重新打开会话时重拉。要做续传，需要后端把生成和连接解耦、SSE 带 `id`、前端指数退避重连、发送带幂等 id。
 5. **为什么用 Zustand？为什么不用 immer？** 选择器粒度细、能在 React 外调用；immer 实测省不了代码，还削弱类型检查。
@@ -736,10 +742,10 @@ jsdom 没有布局引擎，所以布局类问题（5.3 的 `max-width`、5.4 的
 
 ## 附：相关文档
 
-| 文档                                                                   | 内容                                           |
-| ---------------------------------------------------------------------- | ---------------------------------------------- |
-| [interview.md](interview.md)                                           | 面试讲稿全文：选型表、21 个亮点、25 条排查记录 |
-| [api.md](api.md)                                                       | 接口契约、SSE 帧格式、停止协议                 |
-| [diagrams/frontend-architecture.md](diagrams/frontend-architecture.md) | 前端架构 Mermaid 图、组件树                    |
-| [notes/measurements.md](notes/measurements.md)                         | 度量原始记录（第 10 节：按需加载与长会话）     |
-| [conventions.md](conventions.md)                                       | 五板斧、目录与命名、注释规范                   |
+| 文档                                                                   | 内容                                                         |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------ |
+| [interview.md](interview.md)                                           | 面试讲稿全文：选型表、22 个亮点、25 条排查记录               |
+| [api.md](api.md)                                                       | 接口契约、SSE 帧格式、停止协议                               |
+| [diagrams/frontend-architecture.md](diagrams/frontend-architecture.md) | 前端架构 Mermaid 图、组件树                                  |
+| [notes/measurements.md](notes/measurements.md)                         | 度量原始记录（第 10 节：按需加载与长会话；第 11 节：打字机） |
+| [conventions.md](conventions.md)                                       | 五板斧、目录与命名、注释规范                                 |

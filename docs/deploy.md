@@ -23,7 +23,7 @@
    postgresql+psycopg://neondb_owner:npg_XXXX@ep-xxxx-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require
    ```
 
-   这就是 Render 里的 `DATABASE_URL`。表不用手工建：后端启动时 `Base.metadata.create_all` 自动建表并种子演示账号。
+   这就是 Render 里的 `DATABASE_URL`。表不用手工建：后端启动时 `Base.metadata.create_all` 自动建表并种子演示账号；之后新增的列（目前是 `user_settings.typewriter`）也由启动时的 `add_missing_columns` 自动补上，已经部署过的库不需要在 Neon 控制台执行 SQL。
 
 ## (b) Render：部署后端（Docker）
 
@@ -91,11 +91,12 @@ Environment Variables 逐项 **Add**：
 
 1. 打开 Vercel 地址 → 自动跳到 `/login`，页面显示"演示账号 demo / demo123"。
 2. 点 **一键填入** → **登录** → 进入 `/`，左侧出现 29 张角色主卡（第一次点登录可能等 30–60 秒，见"冷启动"）。
-3. 点"陈千语"主卡展开 → 点子卡 → 在输入框输入"你好"回车 → 先出现加载气泡，然后真实 DeepSeek 回复按行逐条出现。
+3. 点"陈千语"主卡展开 → 点子卡 → 在输入框输入"你好"回车 → 先出现加载气泡，然后真实 DeepSeek 回复逐字写出、按行出现（设置 › AI 配置可关闭打字机效果）。
 4. 刷新页面 → 重新展开陈千语 → 子卡预览是刚才回复的最后一行，会话里消息仍在（数据在 Neon）。
 5. 右上角 **设置** → **AI 配置** → **连接测试** → 显示"连接成功"，模型名 `deepseek-flash`。
-6. Render 的 Logs 页能看到 `POST /api/conversations/<id>/chat HTTP/1.1" 200`。
-7. 浏览器 DevTools → Network 里任何请求的 URL 与响应体都不含 DeepSeek Key。
+6. 同一页的 **打字机效果** 开关默认打开；关掉后再发一条消息，回复整行出现、不再逐字写出，刷新后开关仍是关闭（说明后端启动时已给 Neon 的 `user_settings` 表补上 `typewriter` 列）；测完把开关打开。
+7. Render 的 Logs 页能看到 `POST /api/conversations/<id>/chat HTTP/1.1" 200`。
+8. 浏览器 DevTools → Network 里任何请求的 URL 与响应体都不含 DeepSeek Key。
 
 ## 常见失败与排查
 

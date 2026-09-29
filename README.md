@@ -1,6 +1,6 @@
 # Baker Chat
 
-"终末地 BAKER 会话消息"角色聊天应用的 React + FastAPI 重写版：登录后与 29 个内置角色逐行流式对话，AI 由后端代理 DeepSeek，会话、消息与设置按用户存在服务端。
+"终末地 BAKER 会话消息"角色聊天应用的 React + FastAPI 重写版：登录后与 29 个内置角色流式对话，AI 回复逐字写出（打字机效果，可在设置里关闭），由后端代理 DeepSeek，会话、消息与设置按用户存在服务端。
 
 ## 截图
 
@@ -184,11 +184,12 @@ pnpm e2e
 pnpm lint && pnpm typecheck
 pnpm check:docs                    # 源码 💡 注释指向的 docs/interview.md 锚点、文档链接与反引号路径是否存在
 
-# 度量脚本（docs/interview.md 第 4 节有数据与复现步骤）
+# 度量脚本（数据与复现步骤见 docs/interview.md 第 4 节与 docs/notes/measurements.md）
 node scripts/measure/bundle-size.mjs
 backend/.venv/bin/python scripts/measure/seed-messages.py   # 长会话种子数据（100 / 500 / 2000 条）
 node scripts/measure/chat-perf.mjs --base http://127.0.0.1:5791 --api http://127.0.0.1:8791          # 长会话：打开耗时 / DOM / 滚动帧时长
 node scripts/measure/chat-perf.mjs --lazy --base http://127.0.0.1:5791 --api http://127.0.0.1:8791   # 首屏按需加载；完整步骤见 docs/notes/measurements.md 第 10 节
+node scripts/measure/chat-perf.mjs --typing --base http://127.0.0.1:5795 --api http://127.0.0.1:8795 # 打字机逐字写出期间的帧时长（后端 AI_MOCK=1），见 docs/notes/measurements.md 第 11 节
 ```
 
 提交时 husky 会对暂存文件运行 lint-staged（ESLint / ruff / Prettier），commit-msg 由 commitlint 校验 Conventional Commits。

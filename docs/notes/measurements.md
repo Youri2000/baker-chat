@@ -1,6 +1,6 @@
 # 可量化的优化与度量（measurements）
 
-记录字体子集化、流式重渲染次数、产物体积对比三项实测数据，以及两个要等真实 DeepSeek Key 才能出数据的脚本（首个气泡时间、prompt_tokens 曲线）的写法与 AI_MOCK=1 试跑记录。脚本在 `scripts/measure/`，度量用例在 `frontend/src/features/chat/rerender.measure.test.tsx`。日期 2026-09-24；第 10 节（聊天区滚动、按需加载与长会话的前后对比）与第 3 节末的重测为 2026-09-28。
+记录字体子集化、流式重渲染次数、产物体积对比三项实测数据，以及两个要等真实 DeepSeek Key 才能出数据的脚本（首个气泡时间、prompt_tokens 曲线）的写法与 AI_MOCK=1 试跑记录。脚本在 `scripts/measure/`，度量用例在 `frontend/src/features/chat/rerender.measure.test.tsx`。日期 2026-09-24；第 10 节（聊天区滚动、按需加载与长会话的前后对比）与第 3 节末的重测为 2026-09-28；第 11 节（打字机）以及第 3 节末、5.1 的补充说明为 2026-09-29。
 
 测量环境：macOS（Apple Silicon）、Node 22.22.2、pnpm 9.12.0、Python 3.13.5、fonttools 4.66.0 + brotli 1.2.0（scratch 目录临时 venv）、Playwright 1.62.1（e2e 工作区）+ 其自带 Chromium 151.0.7922.34（缓存 revision 1234）、后端 `AI_MOCK=1` 跑在 8022、前端 `vite preview` 跑在 5182。
 
@@ -69,7 +69,7 @@ python3 -m venv /tmp/fontenv && /tmp/fontenv/bin/pip install fonttools brotli
 | ChatBubble 渲染：挂载 20 条历史          | 20      | 20                  |
 | ChatBubble 渲染：发送 → 30 帧 → 重拉完成 | 11      | 348                 |
 
-解读：14 次提交 = 挂载 1 + 乐观追加我方消息 1 + 10 行各 1 + 关加载气泡 1 + 重拉替换 1；30 帧里 20 帧没凑成整行，`pushBubbles` 不写 store，不产生提交。memo 版的 11 = 我方消息 1 + 10 个新气泡各挂载 1 次，已有气泡的 props（`side`、`text`、`animate`）都是原始值，全部跳过；重拉时下标 key 让临时气泡原位换成持久化消息，`text` 相同也跳过。对照版每次提交都重跑列表里全部气泡：21 + (22+…+31) + 31 + 31 = 348，是 memo 版的 31.6 倍；对话越长差距越大（每行的代价是 O(已有行数)）。
+解读：14 次提交 = 挂载 1 + 乐观追加我方消息 1 + 10 行各 1 + 关加载气泡 1 + 重拉替换 1；30 帧里 20 帧没凑成整行，不写 store，不产生提交。memo 版的 11 = 我方消息 1 + 10 个新气泡各挂载 1 次，已有气泡的 props（`side`、`text`、`animate`）都是原始值，全部跳过；重拉时下标 key 让临时气泡原位换成持久化消息，`text` 相同也跳过。对照版每次提交都重跑列表里全部气泡：21 + (22+…+31) + 31 + 31 = 348，是 memo 版的 31.6 倍；对话越长差距越大（每行的代价是 O(已有行数)）。
 
 桩说明：
 
@@ -80,6 +80,8 @@ python3 -m venv /tmp/fontenv && /tmp/fontenv/bin/pip install fonttools brotli
 复现：`cd frontend && pnpm exec vitest run src/features/chat/rerender.measure.test.tsx --reporter=verbose`（0.13 s）。
 
 **引入虚拟列表后（2026-09-28 重测）**：Profiler commit 26 次（两组相同）；ChatBubble 渲染 memo 版挂载 7 + 发送 → 重拉完成 12，对照版挂载 14 + 146。挂载的第一次提交只渲染末尾附近的行，所以挂载数小于 20；提交次数增加来自虚拟列表的测量回调（新行挂载后被测量，测量结果变化让列表再提交一次），逐项来源未单独拆分；对照版减少是因为每次提交只重跑已渲染的行。测试环境让 `offsetHeight` 返回内联 style 的高度（`src/test/setup.ts`），否则 jsdom 里虚拟列表一行都不渲染；用例断言相应放宽为"挂载渲染 ≤ 20"。
+
+**加入打字机后（2026-09-29）**：这个用例以整行模式运行（`sendMessage(QUESTION, false)`），数字与上一段相同（26 次提交，memo 7 + 12，对照 14 + 146）；同一文件的第二个用例测打字机开启时的渲染，见第 11 节。
 
 ## 4. 产物体积对比
 
@@ -115,6 +117,8 @@ cd frontend && VITE_API_BASE_URL=http://localhost:8022 pnpm build && pnpm exec v
 ```
 
 ### 5.1 `scripts/measure/first-bubble.mjs`
+
+> 加入打字机（2026-09-29，默认开启）后，t1 在第一行出现第一个字时就触发；同一次提交里加载气泡就消失，t2 与 t1 几乎相同，不再表示全文完成。要复现本节与第 9.2 节的数字，先在设置"AI 配置"里关闭打字机效果。
 
 流程：接口登录拿 token → `addInitScript` 写入 `localStorage['baker.token']` → 接口为角色新建空会话 → 打开 `/`，`dispatchEvent('click')` 展开主卡并点该角色最后一张子卡（零尺寸 `role=button`，Playwright 认为不可见，沿用 chat.md 的做法）→ 每轮先在页面内装探针（输入框 `keydown` 捕获阶段记 t0；`MutationObserver` 记第一个 `svg:not([role="status"]) > rect.fill-bubble-other` 出现为 t1、`[role="status"][aria-label="正在回复"]` 出现后消失为 t2）→ `fill` + `Enter` → `waitForFunction(t2 > 0)` 读回 → 重复 `--runs` 次取中位数 → 删除该会话。
 
@@ -197,6 +201,7 @@ AI_MOCK=1 试跑：60 条 35.5 s，全部记为 `-`（mock 流没有 usage 帧�
 - `#rerender-memo`：`memo(ChatBubble)` + 下标 key 的重渲染数据（第 3 节；`ChatBubble.tsx` 现有注释可补锚点）。
 - `#bundle-size`：提示词移到后端 + 去依赖 + 子集化的产物对比（第 4 节；`characters.py` 的 `#prompts-backend` 可引用同一表）。
 - `#first-bubble`、`#prompt-tokens`：两份等真实 Key 的数据，脚本与复现命令在第 5 节。
+- `#typewriter`：第 11 节的打字机渲染与帧时长数据（技术亮点，`typewriter.ts` 的 💡 注释已指向）。
 - `#entry-chunk`、`#long-list`：第 10 节的首屏按需加载与长会话数据；对应的技术亮点 `#lazy-preload`、`#virtual-list`、`#auto-scroll` 已由 `lazyWithPreload.tsx`、`MessageList.tsx`、`useChatAutoScroll.ts` 的 💡 注释指向。
 
 ## 9. 真实 DeepSeek 数据（2026-09-24，主会话补测）
@@ -372,3 +377,56 @@ node scripts/measure/chat-perf.mjs --lazy --base http://127.0.0.1:5791 --api htt
 ```
 
 改动前的数据要先把 HEAD（6f2055b）导出到另一目录再按同样步骤构建与启动。
+
+## 11. 打字机输出（2026-09-29，change chat-typewriter-effect）
+
+### 11.1 逐字写出期间的重渲染
+
+用例：`frontend/src/features/chat/rerender.measure.test.tsx` 的第二个用例，随 `pnpm test` 运行。场景与第 3 节相同（20 条历史 + 发送 1 条 + 30 帧 delta、10 行），区别是打字机开启、30 帧按 80 ms 间隔到达（与 mock 后端的节奏一致），用假计时器（含 `performance.now`）推进到逐字写完，再重拉。另外统计"已写完的行（`typing` 为 false、文字是完整的一行）在第一次以完整状态渲染之后又渲染了几次"，memo 版断言为 0。
+
+| 指标                             | memo 版 | 对照版（去掉 memo） |
+| -------------------------------- | ------- | ------------------- |
+| Profiler commit 次数             | 115     | 115                 |
+| ChatBubble 渲染：发送 → 重拉完成 | 102     | 771                 |
+| 已写完的行再次渲染               | 0       | 413                 |
+| 首帧到写完（假时间）             | 6400 ms | 6400 ms             |
+
+解读：提交次数从整行场景的 26 升到 115，来自每次推进写出新字（一次可能写出多个字）、每次行间停顿的开始与结束；推进后可见内容没变就不写 store。memo 版的 102 次渲染几乎都是正在写的那个气泡（每次写出新字 1 次）以及每行出现、写完时的各 1 次；已写完的行在之后的逐字过程中一次也不渲染。对照版每次提交都重跑所有已渲染的气泡。jsdom 的 `ResizeObserver` 是桩，真实浏览器里正在写的气泡每写出新字还会因测量回调多渲染一次，两组相同。
+
+复现：`cd frontend && pnpm exec vitest run src/features/chat/rerender.measure.test.tsx --disable-console-intercept`。
+
+### 11.2 逐字写出期间的帧时长
+
+脚本：`scripts/measure/chat-perf.mjs --typing`（用法写在文件头注释里）。在"洛茜"的第一段会话里（长会话矩阵不用这段会话），分别以打字机开启与关闭（经 `PATCH /api/settings` 切换）、1× 与 4× CPU 降速各发送 5 次"你好"，从按下 Enter 到停止按钮换回发送按钮（回复全部显示）全程用 `requestAnimationFrame` 采样帧间隔；每次结束后清空这段会话的消息与上下文，最后把开关恢复为测量前的值。
+
+- 环境：后端 `AI_MOCK=1`、临时 SQLite、`DAILY_MESSAGE_LIMIT=1000`，端口 8795；前端当前工作区构建后 `vite preview`，端口 5795；演示账号 demo。Apple M4 Pro、macOS 15.5、Node 22.22.2、Playwright 1.62.1 自带 Chromium 151.0.7922.34（headless，rAF 120 Hz 即 8.33 ms 一帧），视口 1920×1080。测量时负载均值约 3–4.5。
+- mock 回复固定三行共 33 字，每 80 ms 发 5 个字，约 560 ms 传完。
+
+| 显示方式 | CPU | 回复耗时中位数（Enter → 全部显示） | 回复耗时（各次）                 | 帧数 | 帧 p50 / p95 / max  | >20 / >33 ms 帧 | LoAF 次数 / 最长 |
+| -------- | --- | ---------------------------------- | -------------------------------- | ---- | ------------------- | --------------- | ---------------- |
+| 打字机   | 1×  | 2335 ms                            | 2340 / 2335 / 2335 / 2333 / 2332 | 280  | 8.3 / 9 / 9.4 ms    | 0 / 0           | 0 / 0 ms         |
+| 打字机   | 4×  | 2436 ms                            | 2436 / 2506 / 2434 / 2432 / 2440 | 285  | 8.3 / 9.2 / 24.4 ms | 1 / 0           | 0 / 0 ms         |
+| 整行     | 1×  | 813 ms                             | 806 / 812 / 813 / 813 / 823      | 96   | 8.3 / 9.1 / 9.3 ms  | 0 / 0           | 0 / 0 ms         |
+| 整行     | 4×  | 894 ms                             | 887 / 894 / 897 / 888 / 894      | 102  | 8.3 / 9.3 / 17.2 ms | 0 / 0           | 0 / 0 ms         |
+
+各次原始值：打字机 4× 的帧 p95 为 9.2 / 9.3 / 9.2 / 9.2 / 9.3 ms，最长帧 17.6 / 28.4 / 25.1 / 17.6 / 24.4 ms；整行 4× 的最长帧 16.6 / 17.2 / 25.1 / 16.7 / 34.1 ms（第 5 次有 1 帧超过 33 ms）。表中其余各列为 5 次中位数，度量脚本输出的原始 JSON 没有入库。
+
+结论：4× CPU 降速下逐字写出全程帧 p95 9.2 ms、中位最长帧 24.4 ms，没有超过 33 ms 的帧，也没有 Long Animation Frame；每次推进只有正在写的气泡与虚拟列表的测量需要工作。代价是回复全部显示的时间变长：三行回复打字机下约 2.4 秒（打字约 0.8 秒、两次行间停顿 1 秒，其余与网络传输重叠），整行约 0.9 秒。
+
+### 11.3 产物体积
+
+直接 `pnpm build`（`frontend/.env` 的接口地址）的 Vite 报告：改动前为 `git archive` 导出的 HEAD 用同样方式构建。入口 274.27 kB（gzip 88.23 kB）不变；聊天页 chunk 113.34 → 116.48 kB（gzip 51.68 → 52.90 kB，+1.22 kB），来自 `typewriter.ts` 与 chatStore 的显示驱动；设置对话框 chunk 14.93 → 15.25 kB（gzip 5.66 → 5.76 kB），来自"AI 配置"页的打字机开关。两者都不在入口里，登录页首屏不受影响。
+
+### 11.4 复现
+
+```bash
+# 后端（backend/，临时库，AI_MOCK=1）
+cd backend && DATABASE_URL=sqlite:////tmp/typing.db JWT_SECRET=<任意 32 字节以上> AI_MOCK=1 DAILY_MESSAGE_LIMIT=1000 \
+  CORS_ORIGINS=http://127.0.0.1:5795 .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8795
+# 前端
+cd frontend && VITE_API_BASE_URL=http://127.0.0.1:8795 pnpm exec vite build --outDir /tmp/typing-dist && \
+  pnpm exec vite preview --outDir /tmp/typing-dist --host 127.0.0.1 --port 5795 --strictPort
+# 度量
+node scripts/measure/chat-perf.mjs --typing --base http://127.0.0.1:5795 --api http://127.0.0.1:8795 \
+  --cpu 1,4 --runs 5 --out chat-perf-typing.json
+```
