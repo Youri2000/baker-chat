@@ -1,0 +1,136 @@
+---
+generated_from_state_version: 15
+---
+
+# 验证
+
+## 当前结果
+
+- 结果: **已归档**
+- 验证情况: **已完成检查，验证结果已确认**
+- 目标周期: 2
+- 迭代: 3
+- 验证器尝试次数: 1
+- 完成时间: 2026-09-29T08:14:40.649Z
+- 摘要: 54 项全部通过。本轮实现与测试未改，只改文档与注释；A5 逐条独立复核：打字机亮点与 💡、问答、Alembic 表述、api/deploy/frontend 文档与当前 typewriter.ts / createReplyDisplay / stopGeneration / reset 一致，行数、用例数、渲染与体积统计与实测和 measurements.md 第 11 节一致，旧实现描述已清除。独立实测：旧库补列（SQLite）、mock 下 1920×1080 与 1280×720 的逐字前缀与约 520 ms 停顿、停止（流中 / 流结束后）、减少动态效果、刷新不重播、产物无 Key。风险：interview.md 第 6 节 CI 与部署状态的过期表述与 test-pyramid 矛盾（范围外，建议归档前修正）。
+
+## 验收
+
+| 编号 | 结果 | 来源 | 验收项 | 原因 |
+| --- | --- | --- | --- | --- |
+| A1 | passed | brief.md | 逐字节奏逻辑集中在 `frontend/src/features/chat/typewriter.ts`，是不依赖 React 与 DOM 的纯函数（输入已收到的文本、当前显示进度与经过的时间，输出新的显示进度与是否处于行间停顿）；网络请求、流式状态与停止仍由 `chatStore` 管理。单元测试覆盖平时约每秒 40 字、积压时最多落后约 1 秒、行间固定停顿 0.5 秒且不因积压缩短、表情 token 整体出现、流结束后写完、停止与错误帧时立即显示。 | typewriter.ts 为不依赖 React/DOM/计时器的纯函数（readSource/step/view/lineView），网络、streaming 与停止仍在 chatStore；typewriter.test.ts 16 例覆盖约 40 字/秒、200 字 1 秒左右写完、慢速到达不落后、停顿 0.5 秒且积压不缩短、表情整体、流结束写完；chatStore.typewriter.test.ts 覆盖停止与错误帧立即显示 |
+| A2 | passed | brief.md | 打字过程中已显示完的气泡渲染 0 次；未写完的前缀不写入气泡尺寸缓存 `measuredSizes`（缓存条目数不随写出的字数增长）。`rerender.measure.test.tsx` 增加打字机开启时的场景，渲染次数与原因写入 `docs/notes/measurements.md`。 | ChatBubble 在 typing 时不写 measuredSizes（ChatBubble.test 断言写字期间缓存条目为 0、写完只缓存整行）；rerender.measure.test 第二个用例本轮复跑：已写完行再次渲染 memo 0 / 对照 413，commit 115，与 measurements.md 11.1 一致 |
+| A3 | passed | brief.md | 用度量脚本在 4× CPU 降速下测量 mock 回复逐字写出全过程的帧时长，p95 不超过 33 ms；方法与数据写入 `docs/notes/measurements.md`。 | measurements.md 11.2 记录 chat-perf.mjs --typing 方法与数据，4× 降速打字机帧 p95 9.2 ms（上轮 Verifier 实测 10.2 ms），脚本本轮未改 |
+| A4 | passed | brief.md | pytest 覆盖 `typewriter` 字段的默认值、读写与跨用户隔离，以及旧库启动补列（用缺少该列的 SQLite 库启动、再次启动不重复补列）。 | test_settings.py 覆盖默认值、PATCH 读写、跨用户隔离（bob 仍为 true）与旧库补列（DROP 列后两次启动只补一次）；Runtime pytest 86 passed |
+| A5 | passed | brief.md | 文档：`docs/interview.md` 新增打字机技术亮点（背景与问题 → 技术调研与选型 → 如何发现问题 → 如何解决 → 结果与代价），代码处有 💡 注释指回该标题，问答中与流式显示相关的回答更新；"没有第二个 schema 版本前不引入 Alembic"的表述改为说明本次选择启动补列的原因；`docs/api.md` 写明 `typewriter` 字段，`docs/deploy.md` 说明启动时自动补列；`docs/frontend.md` 中描述流式显示与设置的内容更新；文档中写死的测试数量、代码行数等统计重新核对。 | 逐条核对通过：interview.md 新增 typewriter 五段式亮点，typewriter.ts 的 💡 指向 #typewriter（check:docs 源码锚点 24 处通过）；Q2/Q3/Q23 与 1.3 数据流、sse、abort-race、jwt-401 已按 createReplyDisplay / activeReply / readSource 改写；Alembic 表述改为启动补列原因（sqlite-postgres、选型表“线上旧库加列”、第 6 节）；api.md 写明 typewriter 字段与补列，deploy.md 说明 add_missing_columns 并加验收第 6 步；frontend.md 4.3/4.5 时序图、状态字段表、目录树、⑥⑨⑩、4.4、5.7、5.10、第 8 节与代码一致；统计复核一致：前端 5,588 行/测试 3,936 行、后端 1,258/1,296 行、sse.ts 109 行（去注释空行 74）、chatStore 556 行、Vitest 27 文件 179 例及逐文件数（sse 10、useChatComposer 12、ChatInput 6、emojiHtml 6、useChatAutoScroll 11、SettingsDialog 13、chatRows 3）、pytest 86、E2E 4、22 个亮点 / 25 条排查、渲染 413→0 / 102 vs 771 / 115 次、chunk 52.90 / 5.76 kB 与 measurements.md 第 11 节一致；旧标识符 carry / pushBubbles / !streaming.pending / “还会有新内容”已无残留。第 6 节 CI 与部署状态的过期表述不在 A5 范围，列入风险 |
+| A6 | passed | brief.md | 仓库根 `pnpm check:docs` 与 `prettier --check .` 通过；前端 lint / typecheck / test / build、后端 ruff / pytest、`pnpm e2e` 全部通过，E2E 能观察到回复的逐字过程（同一气泡先后出现至少 3 个不同长度的前缀），写完后与刷新后内容一致。 | 当前候选 Runtime 检查全部通过：lint、typecheck、vitest 27 文件 179 例、build、ruff、ruff format、pytest 86、check:docs、prettier --check、e2e 4 passed；typewriter.spec 断言首行至少 2 个更短前缀加整行（≥3 个不同长度），并核对写完与刷新后内容 |
+| A7 | passed | specs/baker-chat/spec.md | 注册新账号 - WHEN 用户在 `/register` 输入合法且未被占用的用户名、密码和一致的确认密码并提交 - THEN 账号创建成功，页面自动进入已登录状态并跳到 `/`，看到全部 29 个角色主卡 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A8 | passed | specs/baker-chat/spec.md | 注册表单校验 - WHEN 用户名不合规、已被占用，或两次密码不一致时提交 - THEN 表单不跳转，在对应输入框下方显示中文错误原因；用户名被占用的错误来自后端返回的 409 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A9 | passed | specs/baker-chat/spec.md | 登录与错误密码 - WHEN 用户在 `/login` 输入正确的账号密码 - THEN 跳转到 `/` - WHEN 密码错误 - THEN 停留在登录页，显示"用户名或密码错误" | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A10 | passed | specs/baker-chat/spec.md | 路由守卫与退出 - WHEN 未登录直接访问 `/` - THEN 跳到 `/login` - WHEN 已登录用户在设置中点击"退出登录" - THEN token 被清除并回到 `/login`；此时按浏览器后退也进不了 `/` | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A11 | passed | specs/baker-chat/spec.md | token 失效自动登出 - WHEN localStorage 里的 token 已过期或被篡改，用户在主页上发起任何请求 - THEN 前端跳到 `/login`，并提示"登录已过期，请重新登录" | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A12 | passed | specs/baker-chat/spec.md | 用户数据隔离 - WHEN 用户 A 创建会话并发送消息后，用户 B 登录 - THEN 用户 B 看不到 A 的任何会话、消息、提示词覆盖或设置；用 B 的 token 访问 A 的会话 ID 时返回 404 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A13 | passed | specs/baker-chat/spec.md | 刷新后数据仍在 - WHEN 用户发送消息、收到回复、修改世界观、切换我方头像性别、切换聊天条样式，然后刷新页面或换一个浏览器登录同一账号 - THEN 以上内容全部恢复 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A14 | passed | specs/baker-chat/spec.md | 消息分页接口 - WHEN 某会话有 id 为 1–120 的 120 条消息，依次请求 `GET /api/conversations/{id}/messages`、`?before_id=71`、`?before_id=21` - THEN 依次返回 id 71–120 且 `has_more` 为 true、id 21–70 且 `has_more` 为 true、id 1–20 且 `has_more` 为 false，`items` 都按 id 升序；`limit` 超出 1–100 时返回 422；访问其他用户的会话返回 404 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A15 | passed | specs/baker-chat/spec.md | 旧库启动时自动补列 - WHEN 用一个 `settings` 表还没有 `typewriter` 列、已有用户设置记录的旧库启动后端 - THEN 启动成功并补上该列，已有用户读到的 `typewriter` 为 true，其他设置值不变；之后 `PATCH /api/settings` 修改 `typewriter` 能保存并在 `GET /api/settings` 读回；再次启动不会重复补列或报错 | 本轮独立实测：临时 SQLite 删去 user_settings.typewriter 后启动，列被补上（BOOLEAN NOT NULL DEFAULT TRUE），已有用户读到 true 且温度 0.7 / female / strip 2 不变；PATCH false 后 GET 读回；再次启动无错误、列只有 1 个、值保持 false |
+| A16 | passed | specs/baker-chat/spec.md | 画布等比缩放 - WHEN 浏览器窗口改为 1280×720 - THEN 整个界面按 2/3 等比缩小，不出现滚动条，各元素的相对位置和原设计一致 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A17 | passed | specs/baker-chat/spec.md | 按需加载的加载反馈 - WHEN 已登录用户刷新页面，而聊天页代码的下载被人为延迟 1 秒 - THEN 约 200ms 后页面中央出现三个方块闪烁的加载动画；代码到达后动画消失，聊天页正常显示；不延迟时整个过程不出现加载动画 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A18 | passed | specs/baker-chat/spec.md | 设置弹窗按需加载 - WHEN 已登录用户进入聊天页，在设置弹窗代码尚未加载时按下设置按钮，且该代码的下载被人为延迟 1 秒 - THEN 约 200ms 后弹窗位置出现同样的加载动画，代码到达后设置弹窗正常打开；预取完成后再打开设置，弹窗直接出现 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A19 | passed | specs/baker-chat/spec.md | 展开主卡并选中会话 - WHEN 用户点击"陈千语"主卡，再单击它下面的子卡 - THEN 主卡展开并变为选中，子卡出现黄色选中效果，右侧聊天区顶部显示"陈千语"，并加载这段会话的历史消息 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A20 | passed | specs/baker-chat/spec.md | 子卡预览文案 - WHEN 某段会话没有消息 - THEN 子卡按角色性别显示"和他聊聊 / 和她聊聊 / 和TA聊聊" - WHEN 会话最后一条消息含表情 token - THEN 预览里的表情显示为图片而不是 token 文本 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A21 | passed | specs/baker-chat/spec.md | 新建会话 - WHEN 用户选中"陈千语"主卡后点击"新建会话" - THEN 该主卡下多出一张空子卡并被选中；刷新后这张子卡仍然存在 - WHEN 没有选中任何主卡时点击"新建会话" - THEN 弹出"请先选中角色卡片"提示框 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A22 | passed | specs/baker-chat/spec.md | E 键切换工具栏 - WHEN 焦点不在输入框时按 E - THEN 工具栏隐藏，再按一次恢复显示 - WHEN 焦点在消息输入框内按 E - THEN 输入框输入字母 e，工具栏不变化 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A23 | passed | specs/baker-chat/spec.md | 打开会话停在底部 - WHEN 用户打开一个有 120 条消息的会话 - THEN 只请求最近 50 条消息，消息区停在底部，最后一条消息完整可见，回到底部按钮不显示 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A24 | passed | specs/baker-chat/spec.md | 接近底部时跟随新回复 - WHEN 消息区停在底部，AI 回复逐字写出并逐行出现 - THEN 打字过程中气泡每次变高、每出现一行，消息区都保持在底部，正在写的那一行完整可见 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A25 | passed | specs/baker-chat/spec.md | 向上浏览时不被打断 - WHEN 用户向上滚动超过 80 设计 px 后，AI 继续逐行回复 - THEN 滚动位置不变；按钮先显示"回到底部"，新行到达后变为"有新消息"；点击按钮后平滑滚到底部，按钮消失，之后的新行继续自动跟随 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A26 | passed | specs/baker-chat/spec.md | 滚回底部附近按钮消失 - WHEN 用户向上滚动浏览历史（没有新消息），按钮显示"回到底部"，随后用户自己滚回距底部 80 设计 px 以内 - THEN 按钮消失，之后的新消息恢复自动跟随 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A27 | passed | specs/baker-chat/spec.md | 发送时回到底部 - WHEN 用户向上浏览历史时按 Enter 发送一条消息 - THEN 消息区立即滚到底部，显示刚发出的消息，按钮消失 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A28 | passed | specs/baker-chat/spec.md | 加载更早历史保持位置 - WHEN 会话有 120 条消息，用户打开后向上滚动到距顶部 200 设计 px 以内 - THEN 顶部出现加载气泡，随后插入更早的 50 条消息；原来可见的消息在屏幕上的位置变化不超过 2px；继续向上滚动会再加载剩余 20 条，全部加载后不再发起请求 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A29 | passed | specs/baker-chat/spec.md | 长会话虚拟列表 - WHEN 会话已加载全部 2000 条消息，用户从底部滚动到顶部再滚回底部 - THEN 任一时刻聊天区只渲染可视区域附近的少量消息行，DOM 中的消息行不超过 60 行；滚动过程中消息顺序、头像显隐与间距始终符合本节规则，没有空白或重叠的行 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A30 | passed | specs/baker-chat/spec.md | 头像显隐与间距 - WHEN 会话依次为：我方、我方、AI、AI、我方 - THEN 头像只出现在第 1、3、5 条上；第 1→2 条和第 3→4 条间距为 14，第 2→3 条和第 4→5 条间距为 33 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A31 | passed | specs/baker-chat/spec.md | 聊天条样式循环 - WHEN 用户连续点击聊天条 3 次 - THEN 样式依次变为 v2 → v3 → v1；刷新后保持最后选中的样式 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A32 | passed | specs/baker-chat/spec.md | 切换我方头像性别 - WHEN 用户点击任一我方头像 - THEN 所有我方头像在管理员男/女之间切换；刷新后保持 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A33 | passed | specs/baker-chat/spec.md | 发送与换行 - WHEN 用户输入"你好"后按 Shift+Enter，再输入"在吗"，然后按 Enter - THEN 发出一条两行的我方消息，输入框清空 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A34 | passed | specs/baker-chat/spec.md | 插入表情 - WHEN 用户把光标放在"你好\|世界"中间，打开表情弹层并点击第 1 个表情 - THEN 输入框显示"你好[表情图]世界"；发送后消息的存储文本为 `你好[sns_emoji_001]世界`，界面上显示为图片 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A35 | passed | specs/baker-chat/spec.md | 回复期间表情不插入 - WHEN 用户打开表情弹层后按 Enter 发送消息，在 AI 回复期间点击弹层中的一个表情 - THEN 输入框保持为空，不插入表情；回复结束后再点击表情，表情正常插入到光标位置 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A36 | passed | specs/baker-chat/spec.md | 输入法选词不发送 - WHEN 用户用中文输入法输入拼音，在候选词未上屏时按 Enter 确认候选词 - THEN 候选词上屏到输入框，消息不发送；再按一次 Enter 才发送 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A37 | passed | specs/baker-chat/spec.md | 逐字写出与行间停顿 - WHEN 打字机开启，用户发送消息，AI 返回的流依次包含"第一行\n第二"和"行\n第三行" - THEN 收到第一个数据块后出现一个气泡并逐字写出"第一行"，任意时刻气泡里的文字都是"第一行"的前缀；写完后停顿约 0.5 秒，期间下方显示加载气泡；随后在新气泡里逐字写出"第二行"，同样停顿后写出"第三行"；全部写完后加载气泡消失，输入框恢复可用。共 3 个 AI 气泡，刷新后仍为 3 条且文字相同 | 本轮 mock 后端在 1920×1080 与 1280×720 实测：三行每个时刻都是对应行前缀，首行 7 个长度逐一出现，两次行间停顿约 520 ms 且期间显示加载气泡，写字中不显示加载气泡，最终 3 条 AI 气泡，落库与刷新后相同；可控假上游的原始场景沿用 iteration 1 实测 |
+| A38 | passed | specs/baker-chat/spec.md | 积压时追赶 - WHEN 打字机开启，一个数据块一次送来 200 字的一整行 - THEN 该行从出现第一个字到写完不超过 1.5 秒 - WHEN 数据以每秒约 20 字的速度陆续到达 - THEN 每个字到达后 0.5 秒内就显示出来，不会越落越多 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A39 | passed | specs/baker-chat/spec.md | 表情整体出现 - WHEN 打字机开启，AI 的一行是"你好[sns_emoji_001]世界" - THEN 逐字过程中气泡里依次出现"你""你好""你好[表情图]"等前缀，任何时刻都不出现 `[sns_emoji` 这样的 token 文本片段；写完后显示为"你好[表情图]世界" | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A40 | passed | specs/baker-chat/spec.md | 关闭打字机或减少动态效果时整行显示 - WHEN 用户在设置"AI 配置"里关闭"打字机效果"，或系统开启了"减少动态效果"，然后发送消息，AI 返回的流依次包含"第一行\n第二"和"行\n第三行" - THEN 收到第一个数据块后立即出现完整的"第一行"气泡；第二个数据块到达后出现"第二行"；流结束后出现"第三行"，行间没有停顿。共 3 个 AI 气泡，刷新后仍为 3 条 | 本轮以 reducedMotion: reduce 实测：只出现完整的三行、无前缀；关闭开关的整行模式由 E2E typewriter.spec 在当前候选上通过；另沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A41 | passed | specs/baker-chat/spec.md | 停止生成 - WHEN 打字机开启，AI 已完整发来 2 行、第 3 行只收到一半，界面刚写完第 1 行时，用户点击"停止" - THEN 请求中止，第 2 行立即完整显示，正在写或未收完的第 3 行不显示，加载气泡消失，输入框恢复可用；刷新后该会话这次回复只有这 2 条 AI 消息 | 本轮实测变体：流未结束、首行刚写完时停止，首行保留、未收完的行消失、加载气泡消失、只 POST 1 次 stop，落库为 1 条 aborted，与界面一致；精确场景由 chatStore.typewriter.test 与 iteration 1 假上游实测覆盖 |
+| A42 | passed | specs/baker-chat/spec.md | 流结束后写完再结束 - WHEN 打字机开启，流已经结束（收到 `[DONE]`），界面还没写完 - THEN 剩余内容继续逐字写完，写完前输入区显示"停止"按钮、输入框禁用；写完后恢复为"发送"按钮、输入框可用 - WHEN 在这段时间里点击"停止" - THEN 剩余的行立即全部显示，刷新后内容相同 | 本轮实测：[DONE] 已到、界面只写完首行时停止，剩余两行立即显示，未发 POST /chat/stop，落库 3 条 completed，刷新后一致；写完前显示停止按钮由 E2E sendAndWait 覆盖 |
+| A43 | passed | specs/baker-chat/spec.md | 上游错误提示 - WHEN DeepSeek 返回 401 或请求超时，此前没有收到任何内容 - THEN 会话中出现一个 AI 气泡，内容为 `[错误: …]` 形式的中文原因；输入框恢复可用 - WHEN 打字机开启，已收到"第一行\n第二"后上游出错 - THEN 立即完整显示"第一行"和"第二"两个气泡，随后出现 `[错误: …]` 气泡；刷新后内容相同 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A44 | passed | specs/baker-chat/spec.md | 切换会话时回复写回原会话 - WHEN AI 正在"陈千语"会话里逐字写回复时，用户切换到"洛茜"会话，稍后再切回 - THEN "洛茜"会话不出现加载气泡或回复；切回"陈千语"后从当前进度继续写，已写出的内容不重播，最终看到完整回复 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A45 | passed | specs/baker-chat/spec.md | 历史消息不重播 - WHEN 一条回复写完后刷新页面，或切到其他会话再重新打开这段会话 - THEN 这条回复的各行直接完整显示，没有逐字过程 | 本轮实测：刷新后打开会话只出现 1 次气泡快照（直接完整显示，无逐字过程）；切会话重开沿用前轮实测 |
+| A46 | passed | specs/baker-chat/spec.md | 上下文只带最近 40 条 - WHEN 某会话已有 60 条上下文记录，用户再发送一条消息 - THEN 发给 DeepSeek 的 messages 为 2 条 system 加最近 40 条上下文（包含本条）；可见消息仍为全部 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A47 | passed | specs/baker-chat/spec.md | 每日额度 - WHEN 用户当天已发送 `DAILY_MESSAGE_LIMIT` 条消息后再次发送 - THEN 界面提示"今日额度已用完"，这条消息不出现在会话中，也不调用 DeepSeek | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A48 | passed | specs/baker-chat/spec.md | API Key 不外泄 - WHEN 检查前端构建产物和浏览器开发者工具的网络请求 - THEN 都不包含 DeepSeek API Key | 本轮检查 frontend/dist 不含 backend/.env 中的 Key、JS 中无 sk- 形式串（未打印 Key）；网络请求一侧沿用前轮实测 |
+| A49 | passed | specs/baker-chat/spec.md | 删除对话 - WHEN 某角色有 2 个会话，用户删除当前会话并确认 - THEN 该会话消失，相邻会话被选中；刷新后仍然只剩 1 个 - WHEN 该角色只剩 1 个会话 - THEN "删除对话"按钮为禁用状态 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A50 | passed | specs/baker-chat/spec.md | 清空消息与清空上下文互不影响 - WHEN 用户执行"清空消息"后继续提问"我刚才说了什么" - THEN 界面上旧消息消失，但 AI 仍能引用之前的对话内容 - WHEN 用户执行"清空上下文" - THEN 界面消息保留，之后 AI 不再记得之前的内容 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A51 | passed | specs/baker-chat/spec.md | 修改角色提示词 - WHEN 用户为"陈千语"保存自定义提示词 - THEN 下拉框里该角色显示"已自定义"；之后该角色的请求使用新的提示词 - WHEN 用户点击"恢复默认" - THEN 徽标消失，之后使用内置提示词 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A52 | passed | specs/baker-chat/spec.md | 打字机开关按用户保存 - WHEN 用户在"AI 配置"里关闭"打字机效果"，然后刷新页面，或换一个浏览器登录同一账号 - THEN 开关仍为关闭，之后的回复整行显示；温度与最大 Token 数不受影响 - WHEN 用户重新打开开关 - THEN 之后的回复恢复逐字写出 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A53 | passed | specs/baker-chat/spec.md | 连接测试 - WHEN 后端配置了有效的 DeepSeek Key，用户点击"连接测试" - THEN 显示"连接成功" - WHEN Key 无效 - THEN 显示"连接失败"和原因 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+| A54 | passed | specs/baker-chat/spec.md | 数据管理批量操作 - WHEN 用户点击"删除全部对话"并确认 - THEN 每个角色只剩 1 个空会话，统计中的对话数和消息数变为 0 | 沿用前两轮 Verifier 在同一实现上的浏览器/接口实测（本轮实现与测试未改，mtime 早于上轮验收结束，iteration 3 只改文档与 sse.ts / first-bubble.mjs 注释），当前候选 Runtime 10 项检查通过 |
+
+## 检查
+
+| 检查 | 命令 | 工作目录 | 状态 | 退出码 | 耗时 |
+| --- | --- | --- | --- | ---: | ---: |
+| repo: pnpm lint（frontend + e2e） | lint | . | passed | 0 | 3392 ms |
+| repo: pnpm typecheck（frontend + e2e） | typecheck | . | passed | 0 | 2707 ms |
+| frontend: pnpm test | test | frontend | passed | 0 | 4277 ms |
+| frontend: pnpm build | build | frontend | passed | 0 | 2262 ms |
+| backend: ruff check . | check . | backend | passed | 0 | 59 ms |
+| backend: ruff format --check . | format --check . | backend | passed | 0 | 12 ms |
+| backend: pytest | -q | backend | passed | 0 | 19383 ms |
+| docs: pnpm check:docs | check:docs | . | passed | 0 | 398 ms |
+| repo: prettier --check . | exec prettier --check . | . | passed | 0 | 2095 ms |
+| repo: pnpm e2e（Playwright，AI_MOCK=1，端口 5180 / 8020） | e2e | . | passed | 0 | 26658 ms |
+
+### Builder 报告的证据
+
+以下为 Builder 报告，不等同于 Runtime 检查凭据或独立验收结果。
+
+- 旧实现标识符全量扫描（carry / pushBubbles / pending 旧语义 / takeCompletedLines 用途 / streaming === null）: passed — 剩余命中均为当前实现或整行模式测试的准确描述
+- 独立只读文档核对代理: passed — 7 条确定问题与大部分建议已处理
+- frontend: eslint src/lib/sse.ts: passed — —
+- repo: pnpm check:docs / prettier --check .: passed — 源码锚点 24、文档链接 101、反引号路径 216
+- 已知限制: 规格与 brief 里写的"settings 表"指用户设置表，实际表名是 user_settings（ORM 模型 UserSettings），补列 DDL 作用在 user_settings 上；只是措辞差异。
+- 已知限制: 开关在发送时读取，从下一条回复开始生效；回复进行中切换开关不影响这一条。系统"减少动态效果"同样在发送时判断。
+- 已知限制: 后台标签页里 setTimeout 被浏览器节流到约 1 秒一次，切回前台时正在写的内容会按追赶规则一次补上较多字；行间停顿照常。
+- 已知限制: 帧时长只用 mock 回复（三行 33 字）测量；真实 DeepSeek 长回复未单独测量。E2E 与度量都用 AI_MOCK=1，未请求真实 DeepSeek。
+- 已知限制: 回复全部显示的时间变长：mock 三行在 4× 降速下 894 → 2436 ms；每写出新字列表提交一次（渲染度量场景 26 → 115 次提交）；出字速度与停顿时长固定、不可调（非目标）。
+- 已知限制: E2E 在 Playwright Desktop Chrome 预设下运行，视口为 1280×720（画布 zoom 2/3）。
+- 已知限制: 未提交、未推送；docs/comet/changes/chat-typewriter-effect 与新文件均未提交，按 Archive 流程处理。
+- 已知限制: docs/notes/e2e-ci-deploy.md 是早先 change 的构建记录，其中"CI 没有在 GitHub 上实际跑过"是当时的状态，本次未改动该文件。
+- 已知限制: frontend/src/features/settings/AboutTab.tsx 的更新日志只有 2026-09-24 条目（"回复流式按行逐条出现"是当时的记录），本次没有追加打字机的日志条目。
+- 已知限制: lib/sse.ts 在响应头到达之前就被 abort 时 fetch 抛 AbortError，由 sendMessage 的 catch 按网络错误 toast；这是改动前就有的行为，本次只把注释改准确，未改代码。
+
+## 阻塞项
+
+_无。_
+
+## 风险与跳过的工作
+
+- docs/interview.md 第 6 节“CI 未在 GitHub 上实际运行…首次 push 后要看 Actions…线上 Neon / Render / Vercel 流程未实际执行”与本次改写后的 test-pyramid“CI 已在 GitHub Actions 上实际运行：2026-09-28 推送后三个 job 全部通过”（gh run list 证实 CI 自 09-25 起多次成功）以及同节最后一条“线上地址已部署…线上冒烟”相互矛盾；该条在 HEAD 中已过期、与打字机和统计无关，未计入 A5 失败，建议归档前改掉
+- docs/frontend.md 4.3 时序图 submit → sendMessage("你好")、4.2“交给 onSend（即 chatStore.sendMessage）”与 interview.md 1.3 第 1 步省略了新增的打字机参数（实际为 sendMessage(text, typewriter)，frontend-architecture.md 已写明）；属于省略，不是错误行为
+- docs/frontend.md 6.10“字体仍占产物 gzip 合计的 64%（907.4 / 1,407.8 KB）”未标日期；当前构建 bundle-size 为 1,409.1 KB（64.4%，比例不变）
+- interview.md first-bubble 注记估算首个字在首个数据块后约 25–32 ms（已标“未实测”）；本轮 mock 实测 Enter → 首字约 125 ms，扣除约 80–90 ms 的首块时间约 35–45 ms
+- 沿用范围：A7–A14、A16–A36、A38、A39、A43、A44、A46、A47、A49–A54 及 A37/A41/A45/A48 的部分场景沿用 iteration 1/2 Verifier 在同一实现上的浏览器与接口实测；依据是实现与测试文件 mtime 均早于上轮验收结束（15:20），本轮改动经 git diff 与 mtime 核实只涉及文档与 sse.ts / first-bubble.mjs 注释（playwright.config.ts 仅 💡 注释，14:54，已在上轮候选内）
+- 未请求真实 DeepSeek：A53 连接成功/失败与真实长回复帧时长沿用前轮结论；Postgres 补列只在 SQLite 上验证，线上靠 deploy.md 验收清单第 6 步
+
+## 之前的迭代
+
+| 目标周期 | 迭代 | 尝试 | 结果 | 未解决项 | 摘要 | 完成时间 |
+| ---: | ---: | ---: | --- | --- | --- | --- |
+| 1 | 0 | 0 | recovery | — | Capability association revoked through comet native spec disassociate | 2026-09-29T02:40:51.187Z |
+| 2 | 1 | 1 | fail | A5 | 54 项中 53 项通过，1 项失败（A5）。打字机行为在 1920×1080 与 1280×720 下用可控假上游和 mock 后端实测通过：逐字前缀、0.5 s 行间停顿、积压追赶、表情整体出现、整行模式与减少动态效果、停止、流结束后写完、错误帧、切换会话、历史不重播、开关持久化、连接测试、每日额度与接近底部跟随。旧库补列（SQLite）实测通过；渲染度量数字与文档完全一致；4× CPU 帧 p95 10.2 ms。失败原因是 A5 要求重新核对文档里写死的统计，但 interview.md 与 frontend.md 仍有 5 处过期的测试数量或日期说明。 | 2026-09-29T05:53:48.572Z |
+| 2 | 2 | 1 | fail | A5 | 54 项中 53 项通过，A5 失败。文档里写死的统计（用例数、代码行数、逐文件用例数、E2E 数、渲染度量、chunk 体积、锚点数）已全部重核，与当前代码和度量一致。失败原因是 docs/frontend.md 中描述流式显示的内容仍未全部更新：4.3 时序图、4.5 停止细节、8 Q2 仍描述已删除的 carry / pushBubbles 按行缓冲，以及 !streaming.pending 的停止拦截与"还会有新内容"的 pending 语义；interview.md 的 sse、abort-race 亮点也有同类过期描述。本轮自测旧库补列、打字机逐字前缀与 0.5 s 停顿、刷新不重播，均通过；其余行为沿用上一轮在同一实现上的实测。 | 2026-09-29T07:20:31.231Z |
+| 2 | 3 | 1 | pass | — | 54 项全部通过。本轮实现与测试未改，只改文档与注释；A5 逐条独立复核：打字机亮点与 💡、问答、Alembic 表述、api/deploy/frontend 文档与当前 typewriter.ts / createReplyDisplay / stopGeneration / reset 一致，行数、用例数、渲染与体积统计与实测和 measurements.md 第 11 节一致，旧实现描述已清除。独立实测：旧库补列（SQLite）、mock 下 1920×1080 与 1280×720 的逐字前缀与约 520 ms 停顿、停止（流中 / 流结束后）、减少动态效果、刷新不重播、产物无 Key。风险：interview.md 第 6 节 CI 与部署状态的过期表述与 test-pyramid 矛盾（范围外，建议归档前修正）。 | 2026-09-29T08:14:40.649Z |
+
+
+
+## 结论
+
+54 项全部通过。本轮实现与测试未改，只改文档与注释；A5 逐条独立复核：打字机亮点与 💡、问答、Alembic 表述、api/deploy/frontend 文档与当前 typewriter.ts / createReplyDisplay / stopGeneration / reset 一致，行数、用例数、渲染与体积统计与实测和 measurements.md 第 11 节一致，旧实现描述已清除。独立实测：旧库补列（SQLite）、mock 下 1920×1080 与 1280×720 的逐字前缀与约 520 ms 停顿、停止（流中 / 流结束后）、减少动态效果、刷新不重播、产物无 Key。风险：interview.md 第 6 节 CI 与部署状态的过期表述与 test-pyramid 矛盾（范围外，建议归档前修正）。
