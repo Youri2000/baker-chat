@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, TypeDecorator, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, String, Text, TypeDecorator, UniqueConstraint, true
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -53,6 +53,9 @@ class UserSettings(Base):
     world_setting: Mapped[str] = mapped_column(Text, default="")
     my_gender: Mapped[str] = mapped_column(String(10), default="male")
     strip_variant: Mapped[int] = mapped_column(default=0)
+    # AI 回复逐字输出；server_default 让 create_all 建出的列
+    # 与启动补列（add_missing_columns）的默认值一致
+    typewriter: Mapped[bool] = mapped_column(default=True, server_default=true())
 
 
 class PromptOverride(Base):

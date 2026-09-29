@@ -126,6 +126,7 @@ class SettingsOut(BaseModel):
     world_setting_is_default: bool
     my_gender: Literal["male", "female"]
     strip_variant: Literal[0, 1, 2]
+    typewriter: bool
     model: str
     daily_limit: int
     daily_used: int
@@ -139,6 +140,7 @@ class SettingsPatch(BaseModel):
     world_setting: str | None = None
     my_gender: Literal["male", "female"] | None = None
     strip_variant: Literal[0, 1, 2] | None = None
+    typewriter: bool | None = None
 
     @field_validator("world_setting")
     @classmethod

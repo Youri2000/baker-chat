@@ -22,6 +22,7 @@ def to_settings_out(db: Session, user: User, user_settings: UserSettings) -> Set
         world_setting_is_default=not user_settings.world_setting,
         my_gender=user_settings.my_gender,
         strip_variant=user_settings.strip_variant,
+        typewriter=user_settings.typewriter,
         model=settings.deepseek_model,
         daily_limit=settings.daily_message_limit,
         daily_used=count_today_messages(db, user.id),

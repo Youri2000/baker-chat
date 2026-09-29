@@ -1,4 +1,4 @@
-"""应用入口：创建 FastAPI、配置 CORS、注册路由；启动时建表并种子演示账号。"""
+"""应用入口：创建 FastAPI、配置 CORS、注册路由；启动时建表、给旧表补列并种子演示账号。"""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from app.config import settings
-from app.db import Base, SessionLocal, engine
+from app.db import Base, SessionLocal, add_missing_columns, engine
 from app.models import User
 from app.routers import auth, chat, conversations, data, prompts
 from app.routers import settings as settings_router
@@ -18,12 +18,13 @@ from app.routers.auth import create_user
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """启动阶段：确保 SQLite 数据目录存在、建表、演示账号不存在则创建。"""
+    """启动阶段：确保 SQLite 数据目录存在、建表、给旧表补列、演示账号不存在则创建。"""
     if settings.database_url.startswith("sqlite:///"):
         Path(settings.database_url.removeprefix("sqlite:///")).parent.mkdir(
             parents=True, exist_ok=True
         )
     Base.metadata.create_all(engine)
+    add_missing_columns(engine)
     with SessionLocal() as db:
         if db.scalar(select(User).where(User.username == settings.demo_username)) is None:
             create_user(db, settings.demo_username, settings.demo_password)
