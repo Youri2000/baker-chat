@@ -17,6 +17,7 @@ const SETTINGS: Settings = {
   world_setting_is_default: true,
   my_gender: 'male',
   strip_variant: 0,
+  typewriter: true,
   model: 'deepseek-flash',
   daily_limit: 100,
   daily_used: 0,
@@ -54,6 +55,7 @@ describe('settingsStore.updateSettings', () => {
     expect(useSettingsStore.getState().settings).toEqual({
       ...SETTINGS,
       strip_variant: 1,
+      typewriter: true,
       daily_used: 3,
     });
   });

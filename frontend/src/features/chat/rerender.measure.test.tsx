@@ -7,6 +7,8 @@
  * 消息列表是虚拟列表：挂载的第一次提交只渲染末尾附近的行，所以挂载渲染次数不超过历史条数；
  * 每个新行被测量后虚拟列表会多触发一次列表重渲染，提交次数因此比不虚拟化时多。
  * 断言只做宽松的"挂载渲染 ≤ 历史条数"与"memo 版 ≤ 对照版"，具体数字打印到 stdout，并记录在 docs/notes/measurements.md。
+ * 打字机场景：同样 30 帧按 80ms 间隔到达（与 mock 后端一致），假计时器推进时间直到逐字写完；
+ * 额外统计"已写完的行在之后又渲染了几次"，memo 版必须为 0。
  */
 import { act, cleanup, render } from '@testing-library/react';
 import { memo, Profiler, type ReactElement } from 'react';
@@ -21,7 +23,10 @@ import { tokenStorage } from '@/lib/http';
 import { jsonResponse, mockFetch, sseResponse } from '@/test/mockFetch';
 
 /** 渲染计数与 memo 开关；vi.mock 工厂会被提升到文件顶部，只能引用 vi.hoisted 的值 */
-const probe = vi.hoisted(() => ({ memo: true, render: vi.fn() }));
+const probe = vi.hoisted(() => ({
+  memo: true,
+  render: vi.fn<(props: { text: string; typing?: boolean }) => void>(),
+}));
 
 // 用计数版替换 ChatBubble：memo 版包一层 memo，对照版直接渲染；两者内部都调用原组件函数
 vi.mock('@/features/chat/ChatBubble', async (importOriginal) => {
@@ -32,7 +37,7 @@ vi.mock('@/features/chat/ChatBubble', async (importOriginal) => {
   };
   /** 计数后执行原组件（hooks 在本组件内运行） */
   function Counted(props: ChatBubbleProps) {
-    probe.render();
+    probe.render(props);
     return renderOriginal(props);
   }
   const Memoized = memo(Counted);
@@ -61,6 +66,7 @@ const SETTINGS: Settings = {
   world_setting_is_default: true,
   my_gender: 'male',
   strip_variant: 0,
+  typewriter: true,
   model: 'deepseek-flash',
   daily_limit: 100,
   daily_used: 0,
@@ -151,7 +157,7 @@ async function runScenario(useMemo: boolean): Promise<Stats> {
 
   let sending!: Promise<void>;
   act(() => {
-    sending = useChatStore.getState().sendMessage(QUESTION);
+    sending = useChatStore.getState().sendMessage(QUESTION, false);
   });
   // ⚠️ 每帧一次 act：同一 act 内的多次 set 会被合并成一次提交，与真实的逐帧到达不符
   for (const frame of FRAMES) {
@@ -167,6 +173,95 @@ async function runScenario(useMemo: boolean): Promise<Stats> {
   cleanup();
 
   return { commits, mountRenders, streamRenders: probe.render.mock.calls.length - mountRenders };
+}
+
+/** 打字机场景的统计 */
+interface TypingStats extends Stats {
+  /** 已写完的行（typing 为 false、文字是完整的一行）在第一次以完整状态渲染之后又渲染的次数 */
+  repeatRenders: number;
+  /** 从第一帧到写完的假时间（毫秒） */
+  typingMs: number;
+}
+
+/** 跑一遍打字机场景：挂载 → 发送 → 30 帧每 80ms 一帧 → [DONE] → 逐字写完 → 重拉 */
+async function runTypewriter(useMemo: boolean): Promise<TypingStats> {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+  try {
+    probe.memo = useMemo;
+    probe.render.mockClear();
+    useChatStore.setState({
+      conversations: CONVERSATIONS,
+      activeConversationId: 1,
+      activeCharacterName: '陈千语',
+      messagesByConversation: { 1: HISTORY },
+      streaming: null,
+    });
+    useSettingsStore.setState({ settings: SETTINGS });
+
+    const sse = sseResponse();
+    let releaseMessages = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseMessages = resolve;
+    });
+    mockFetch(async (req) => {
+      if (req.path.endsWith('/chat')) return sse.response;
+      await gate;
+      return jsonResponse({ items: PERSISTED, has_more: false });
+    });
+
+    let commits = 0;
+    render(
+      <Profiler
+        id="chat-area"
+        onRender={() => {
+          commits += 1;
+        }}
+      >
+        <ChatArea />
+      </Profiler>,
+    );
+    const mountRenders = probe.render.mock.calls.length;
+
+    let sending!: Promise<void>;
+    act(() => {
+      sending = useChatStore.getState().sendMessage(QUESTION, true);
+    });
+    const start = performance.now();
+    for (const frame of FRAMES) {
+      await act(async () => {
+        sse.push(frame);
+        await vi.advanceTimersByTimeAsync(80);
+      });
+    }
+    await act(async () => {
+      sse.push('data: [DONE]\n\n');
+      sse.close();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    // 流已结束，推进时间直到逐字写完（加载气泡与正在写的气泡都消失）
+    while (
+      useChatStore.getState().streaming?.pending ||
+      useChatStore.getState().streaming?.typing
+    ) {
+      await act(async () => vi.advanceTimersByTimeAsync(100));
+    }
+    const typingMs = performance.now() - start;
+    await act(async () => releaseMessages());
+    await sending;
+    cleanup();
+
+    const streamCalls = probe.render.mock.calls.slice(mountRenders).map(([props]) => props);
+    const seen = new Set<string>();
+    let repeatRenders = 0;
+    for (const props of streamCalls) {
+      if (props.typing || !LINES.includes(props.text)) continue;
+      if (seen.has(props.text)) repeatRenders += 1;
+      seen.add(props.text);
+    }
+    return { commits, mountRenders, streamRenders: streamCalls.length, repeatRenders, typingMs };
+  } finally {
+    vi.useRealTimers();
+  }
 }
 
 describe('流式回复期间的重渲染次数', () => {
@@ -196,5 +291,26 @@ describe('流式回复期间的重渲染次数', () => {
     expect(memoized.mountRenders).toBeLessThanOrEqual(HISTORY_COUNT);
     expect(memoized.streamRenders).toBeLessThanOrEqual(control.streamRenders);
     expect(memoized.commits).toBeLessThanOrEqual(control.commits);
+  });
+
+  /** 打字机开启：已写完的行在后续逐字过程中不再渲染（memo 版为 0），整体渲染次数不多于对照版 */
+  it('打字机开启时已写完的气泡不重渲染', async () => {
+    const memoized = await runTypewriter(true);
+    const control = await runTypewriter(false);
+
+    console.log(
+      [
+        `打字机场景：${HISTORY_COUNT} 条历史 + 发送 1 条 + ${FRAMES.length} 帧 delta（每 80ms 一帧，${LINE_COUNT} 行）+ [DONE] + 逐字写完 + 重拉`,
+        '| 指标 | memo 版 | 对照版（去掉 memo） |',
+        '| --- | --- | --- |',
+        `| Profiler commit 次数 | ${memoized.commits} | ${control.commits} |`,
+        `| ChatBubble 渲染：发送 → 重拉完成 | ${memoized.streamRenders} | ${control.streamRenders} |`,
+        `| 已写完的行再次渲染 | ${memoized.repeatRenders} | ${control.repeatRenders} |`,
+        `| 首帧到写完（假时间） | ${Math.round(memoized.typingMs)} ms | ${Math.round(control.typingMs)} ms |`,
+      ].join('\n'),
+    );
+
+    expect(memoized.repeatRenders).toBe(0);
+    expect(memoized.streamRenders).toBeLessThanOrEqual(control.streamRenders);
   });
 });

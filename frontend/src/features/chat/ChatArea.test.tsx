@@ -33,6 +33,7 @@ const SETTINGS: Settings = {
   world_setting_is_default: true,
   my_gender: 'male',
   strip_variant: 0,
+  typewriter: true,
   model: 'deepseek-flash',
   daily_limit: 100,
   daily_used: 0,
@@ -169,6 +170,7 @@ describe('ChatArea', () => {
       streaming: {
         conversationId: 1,
         bubbles: ['第一行'],
+        typing: false,
         pending: true,
         controller: new AbortController(),
       },
@@ -200,7 +202,7 @@ describe('ChatArea', () => {
     selectConversation([msg(1, 'mine', '在吗'), msg(2, 'other', '在的')]);
     const controller = new AbortController();
     useChatStore.setState({
-      streaming: { conversationId: 1, bubbles: [], pending: true, controller },
+      streaming: { conversationId: 1, bubbles: [], typing: false, pending: true, controller },
     });
     const { container } = render(<ChatArea />);
     const scroll = container.querySelector<HTMLDivElement>('.scroll-mask')!;
@@ -230,7 +232,13 @@ describe('ChatArea', () => {
     // 暂停期间流式新行到达：改为"有新消息"，滚动位置不变
     act(() => {
       useChatStore.setState({
-        streaming: { conversationId: 1, bubbles: ['第一行'], pending: true, controller },
+        streaming: {
+          conversationId: 1,
+          bubbles: ['第一行'],
+          typing: false,
+          pending: true,
+          controller,
+        },
       });
     });
     expect(screen.getByRole('button', { name: /有新消息/ })).toBeInTheDocument();

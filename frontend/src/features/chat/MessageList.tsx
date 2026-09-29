@@ -80,6 +80,8 @@ export function MessageList({
   const own = streaming !== null && streaming.conversationId === conversationId;
   const bubbles = own ? streaming.bubbles : [];
   const pending = own && streaming.pending;
+  // 打字机正在写的是最后一个临时气泡
+  const typingIndex = own && streaming.typing ? messages.length + bubbles.length - 1 : -1;
 
   const rows: RowItem[] = [
     ...messages.map((m) => ({
@@ -241,6 +243,7 @@ export function MessageList({
                         side={row.side}
                         text={row.text}
                         animate={Number(item.key) >= origin.threshold}
+                        typing={item.index === typingIndex}
                       />
                     )}
                   </ChatMessageRow>

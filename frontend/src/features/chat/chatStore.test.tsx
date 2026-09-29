@@ -1,5 +1,5 @@
 /**
- * @file chatStore 流式测试：delta 逐行产生 bubbles、发送时子卡预览立即更新、[DONE] 后重拉、
+ * @file chatStore 流式测试（整行模式，打字机模式见 chatStore.typewriter.test.ts）：delta 逐行产生 bubbles、发送时子卡预览立即更新、[DONE] 后重拉、
  * 停止先 POST stop 再结束本地 fetch、切换会话后流仍写回原会话、reset 中止流并回到初始状态；
  * 以及选中/折叠、删除会话 409 后重拉的基础行为。服务端发完 [DONE] 即关闭流，桩也照此 close。
  */
@@ -72,7 +72,7 @@ function setupServer(onStop: () => { stopped: boolean } = () => ({ stopped: fals
 async function startStreaming(server: Server): Promise<{ sending: Promise<void> }> {
   await useChatStore.getState().loadConversations();
   await useChatStore.getState().selectConversation(1);
-  const sending = useChatStore.getState().sendMessage('在吗');
+  const sending = useChatStore.getState().sendMessage('在吗', false);
   await flush();
   server.sse.push('data: {"delta":"第一行\\n第二"}\n\n');
   await flush();
@@ -152,7 +152,7 @@ describe('chatStore', () => {
     const { sse } = setupServer();
     await useChatStore.getState().loadConversations();
     await useChatStore.getState().selectConversation(1);
-    const sending = useChatStore.getState().sendMessage('在吗');
+    const sending = useChatStore.getState().sendMessage('在吗', false);
     await flush();
     // 乐观追加我方消息 + 加载中；子卡预览立即变成刚发出的消息
     expect(useChatStore.getState().messagesByConversation[1]).toMatchObject([
@@ -183,7 +183,7 @@ describe('chatStore', () => {
     const { sse, setMessages } = setupServer();
     await useChatStore.getState().loadConversations();
     await useChatStore.getState().selectConversation(1);
-    const sending = useChatStore.getState().sendMessage('在吗');
+    const sending = useChatStore.getState().sendMessage('在吗', false);
     await flush();
     sse.push('data: {"delta":"第一行\\n第二行"}\n\n');
     await flush();
@@ -302,7 +302,7 @@ describe('chatStore', () => {
     const { sse, setMessages } = setupServer();
     await useChatStore.getState().loadConversations();
     await useChatStore.getState().selectConversation(1);
-    const sending = useChatStore.getState().sendMessage('在吗');
+    const sending = useChatStore.getState().sendMessage('在吗', false);
     await flush();
     await useChatStore.getState().selectConversation(2);
     sse.push('data: {"delta":"回复\\n"}\n\n');
@@ -328,7 +328,7 @@ describe('chatStore', () => {
     const { sse } = setupServer();
     await useChatStore.getState().loadConversations();
     await useChatStore.getState().selectConversation(1);
-    const sending = useChatStore.getState().sendMessage('在吗');
+    const sending = useChatStore.getState().sendMessage('在吗', false);
     await flush();
     sse.push('data: {"error":"上游响应超时"}\n\n');
     await flush();

@@ -1,15 +1,17 @@
 /**
  * @file 聊天数据层：会话列表、按会话缓存的消息、选中/折叠状态，以及 AI 流式回复。
  * 消息分页加载：打开会话只取最近一页，滚到顶部附近再取更早的一页插到前面；
- * 流式回复期间用 streaming.bubbles 逐行暂存 AI 气泡，流结束后重新拉取最新一页，与已加载的更早历史合并；
- * 停止生成先走后端 /chat/stop（它返回时服务端已落库并以 [DONE] 结束流），本地 AbortController 只兜底结束 fetch。
+ * 流式回复期间用 streaming.bubbles 暂存 AI 气泡：打字机开启时按 typewriter.ts 的节奏逐字写出，关闭时整行出现；
+ * 内容全部显示后重新拉取最新一页，与已加载的更早历史合并。
+ * 停止生成先把界面收成与落库一致的内容，再走后端 /chat/stop（它返回时服务端已落库并以 [DONE] 结束流），
+ * 本地 AbortController 只兜底结束 fetch。
  * 所有动作失败时自行 toast，不向调用方 reject（网络与鉴权是唯一的错误边界）。
  */
 import { create } from 'zustand';
 import { toastError } from '@/components/toastStore';
 import { CHARACTERS } from '@/constants/characters';
 import { ApiError, tokenStorage } from '@/lib/http';
-import { streamSse, takeCompletedLines } from '@/lib/sse';
+import { streamSse } from '@/lib/sse';
 import { onUserSwitch } from '@/features/auth/userSwitch';
 import {
   clearContext as apiClearContext,
@@ -23,14 +25,24 @@ import {
   type Message,
   type MessagePage,
 } from '@/features/chat/api';
+import {
+  INITIAL_TYPEWRITER,
+  lineView,
+  readSource,
+  step,
+  view,
+  type TypewriterView,
+} from '@/features/chat/typewriter';
 
 /** 进行中的 AI 回复 */
 export interface StreamingState {
   /** 目标会话；用户切到别的会话时，回复仍写回这里 */
   conversationId: number;
-  /** 已收完整的行，每行一个临时气泡 */
+  /** 当前可见的行，每行一个临时气泡；打字机开启时最后一个可能是正在写的前缀 */
   bubbles: string[];
-  /** 还会有新内容（显示加载气泡）；用户请求停止后、以及流结束到消息重拉完成之间为 false，bubbles 仍保留 */
+  /** 最后一个临时气泡还在写（尺寸会继续变化，不写入尺寸缓存） */
+  typing: boolean;
+  /** 显示加载气泡：首个字前、行间停顿、等待下一行；内容全部显示后到消息重拉完成之间为 false，bubbles 仍保留 */
   pending: boolean;
   /** 本地 fetch 的取消句柄；stop 返回后用它兜底结束读取 */
   controller: AbortController;
@@ -71,9 +83,12 @@ export interface ChatState extends ChatData {
   clearMessages: (id: number) => Promise<void>;
   /** 清空 AI 上下文 */
   clearContext: (id: number) => Promise<void>;
-  /** 向当前会话发送消息并流式接收回复 */
-  sendMessage: (text: string) => Promise<void>;
-  /** 停止当前回复：先让后端落库并结束流，再结束本地 fetch；已显示的行保留到消息重拉 */
+  /** 向当前会话发送消息并流式接收回复；typewriter 为 true 时逐字写出（系统减少动态效果时仍整行显示） */
+  sendMessage: (text: string, typewriter: boolean) => Promise<void>;
+  /**
+   * 停止当前回复：界面立即显示与落库一致的行（流未结束时只保留已收完整的行），再让后端落库并结束流、结束本地 fetch；
+   * 流已结束、只是还没写完时直接显示剩余的行
+   */
   stopGeneration: () => Promise<void>;
   /** 丢弃本地消息缓存（数据管理"清空全部消息"后） */
   forgetMessages: () => void;
@@ -92,6 +107,136 @@ const INITIAL: ChatData = {
   collapsedCharacters: Object.fromEntries(CHARACTERS.map((c) => [c.name, true])),
   streaming: null,
 };
+
+/** 逐字推进的时间步长（毫秒） */
+const TICK_MS = 16;
+
+/** 系统是否开启了"减少动态效果" */
+function prefersReducedMotion(): boolean {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+}
+
+/** 一次回复的显示驱动；由 sendMessage 创建，stopGeneration 与 reset 通过它收尾 */
+interface ReplyDisplay {
+  /** 内容全部显示（写完、停止、出错或取消）时兑现 */
+  finished: Promise<void>;
+  /** 收到一段增量文本 */
+  receive: (delta: string) => void;
+  /** 流结束（[DONE] 或读取结束）：剩余内容照常写完 */
+  end: () => void;
+  /** 上游出错：已收到的全部文本立即按行显示，随后显示错误气泡 */
+  fail: (message: string) => void;
+  /** 停止：立即显示与落库一致的行；返回流是否仍在进行（需要请求后端停止） */
+  stop: () => boolean;
+  /** 取消：不再更新界面（reset 时用） */
+  cancel: () => void;
+}
+
+/** 两次可见内容是否相同，相同就不写 store */
+function sameView(a: TypewriterView, b: TypewriterView): boolean {
+  return (
+    a.typing === b.typing &&
+    a.loading === b.loading &&
+    a.lines.length === b.lines.length &&
+    a.lines.every((line, i) => line === b.lines[i])
+  );
+}
+
+/**
+ * ✅ 创建一次回复的显示驱动：累积收到的文本，打字机开启时每 TICK_MS 按 typewriter.ts 推进一次进度，
+ * 关闭时只显示完整的行；可见内容变化才调用 onView
+ */
+function createReplyDisplay(
+  typewriter: boolean,
+  onView: (view: TypewriterView) => void,
+): ReplyDisplay {
+  let received = '';
+  let done = false;
+  let over = false;
+  let state = INITIAL_TYPEWRITER;
+  let last = performance.now();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  // 与 sendMessage 写入的初始 streaming 一致：内容没变时不重复写 store
+  let shown: TypewriterView = { lines: [], typing: false, loading: true };
+  let resolveFinished = () => {};
+  const finished = new Promise<void>((resolve) => {
+    resolveFinished = resolve;
+  });
+
+  /** 可见内容变化时交给 onView */
+  function emit(next: TypewriterView) {
+    if (sameView(shown, next)) return;
+    shown = next;
+    onView(next);
+  }
+
+  /** 结束驱动：停掉计时器并兑现 finished */
+  function finish() {
+    over = true;
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+    resolveFinished();
+  }
+
+  /** 把进度推进到当前时刻（新内容登记之前调用，空闲时间不会攒成出字额度） */
+  function advance() {
+    const now = performance.now();
+    state = step(state, readSource(received, done), now - last);
+    last = now;
+  }
+
+  /** 按当前进度更新界面，还有要写的内容就安排下一次推进 */
+  function render() {
+    const source = readSource(received, done);
+    if (!typewriter) {
+      emit(lineView(source));
+      if (done) finish();
+      return;
+    }
+    state = step(state, source, 0);
+    emit(view(state, source));
+    if (state.finished) finish();
+    else if (timer === null) {
+      timer = setTimeout(() => {
+        timer = null;
+        advance();
+        render();
+      }, TICK_MS);
+    }
+  }
+
+  return {
+    finished,
+    receive: (delta) => {
+      if (over) return;
+      if (typewriter) advance();
+      received += delta;
+      render();
+    },
+    end: () => {
+      if (over) return;
+      if (typewriter) advance();
+      done = true;
+      render();
+    },
+    fail: (message) => {
+      if (over) return;
+      const lines = readSource(received, true).lines.map((units) => units.join(''));
+      emit({ lines: [...lines, `[错误: ${message}]`], typing: false, loading: false });
+      finish();
+    },
+    stop: () => {
+      if (over) return false;
+      const source = readSource(received, done);
+      emit({ ...lineView(source), loading: false });
+      finish();
+      return !done;
+    },
+    cancel: () => {
+      if (!over) finish();
+    },
+  };
+}
 
 /** 用某会话的消息列表回写它的 last_message（子卡预览） */
 function withLastMessage(
@@ -128,6 +273,9 @@ function mergeLatest(
 
 /** 聊天数据层 */
 export const useChatStore = create<ChatState>()((set, get) => {
+  /** 进行中回复的显示驱动；同一时刻最多一个 */
+  let activeReply: ReplyDisplay | null = null;
+
   /** 拉取某会话最近一页消息（替换已加载的消息）并同步它的预览 */
   async function reloadMessages(id: number): Promise<void> {
     const page = await getMessages(id);
@@ -277,8 +425,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
       }
     },
 
-    // ✅ 发送 → 乐观追加我方消息 → 流式按行产生临时气泡 → 流结束后重拉该会话消息
-    sendMessage: async (text) => {
+    // ✅ 发送 → 乐观追加我方消息 → 流式逐字（或整行）显示临时气泡 → 内容全部显示后重拉该会话消息
+    sendMessage: async (text, typewriter) => {
       const conversationId = get().activeConversationId;
       // 同一时刻只允许一条回复在进行
       if (conversationId === null || get().streaming !== null) return;
@@ -296,21 +444,27 @@ export const useChatStore = create<ChatState>()((set, get) => {
           messagesByConversation: { ...s.messagesByConversation, [conversationId]: messages },
           // 子卡预览立即显示刚发出的消息，不等流结束
           conversations: withLastMessage(s.conversations, conversationId, messages),
-          streaming: { conversationId, bubbles: [], pending: true, controller },
+          streaming: { conversationId, bubbles: [], typing: false, pending: true, controller },
         };
       });
 
-      /** 追加临时气泡；⚠️ 只通过 set 的最新状态写入，不捕获外层 streaming 对象 */
-      const pushBubbles = (lines: string[]) => {
-        if (lines.length === 0) return;
+      // ⚠️ 只写回本次回复自己的 streaming：reset 后发起的新回复有新的 controller，旧驱动的迟到更新不能串进去
+      const reply = createReplyDisplay(typewriter && !prefersReducedMotion(), (next) =>
         set((s) =>
-          s.streaming === null
+          s.streaming?.controller !== controller
             ? s
-            : { streaming: { ...s.streaming, bubbles: [...s.streaming.bubbles, ...lines] } },
-        );
-      };
-      // 跨 delta 的未完成行
-      let carry = '';
+            : {
+                streaming: {
+                  ...s.streaming,
+                  bubbles: next.lines,
+                  typing: next.typing,
+                  pending: next.loading,
+                },
+              },
+        ),
+      );
+      activeReply = reply;
+      let failed = false;
       try {
         await streamSse(
           `/conversations/${conversationId}/chat`,
@@ -318,37 +472,36 @@ export const useChatStore = create<ChatState>()((set, get) => {
           {
             signal: controller.signal,
             token: tokenStorage.get(),
-            onDelta: (delta) => {
-              const { lines, rest } = takeCompletedLines(carry + delta);
-              carry = rest;
-              pushBubbles(lines);
-            },
-            onError: (message) => {
-              carry = '';
-              pushBubbles([`[错误: ${message}]`]);
-            },
-            onDone: () => {
-              // [DONE] 后剩余非空文本作为最后一个气泡；用户已请求停止时后端丢弃了这段半行，这里同样不显示
-              const last = carry.trim();
-              carry = '';
-              if (last !== '' && get().streaming?.pending === true) pushBubbles([last]);
-            },
+            onDelta: (delta) => reply.receive(delta),
+            onError: (message) => reply.fail(message),
+            onDone: () => reply.end(),
           },
         );
       } catch (err) {
-        // 非 2xx（如 429 今日额度已用完）或网络错误；后端未保存消息，重拉会移除乐观消息
+        // 非 2xx（如 429 今日额度已用完）或网络错误；后端未保存或按中断落库（丢弃半行），与停止同样收尾
+        failed = true;
         toastError(err);
       }
-      // 先关掉加载气泡，bubbles 保留到重拉完成
-      set((s) => (s.streaming === null ? s : { streaming: { ...s.streaming, pending: false } }));
-      // reset()（退出登录 / 删除全部对话）已中止本次回复并清空 streaming：这段会话不再属于当前状态，不重拉
-      if (get().streaming === null) return;
+      if (failed) reply.stop();
+      else reply.end();
+      // 打字机开启时流结束后还要把剩余内容写完；这段时间仍算回复中，停止按钮可用
+      await reply.finished;
+      if (activeReply === reply) activeReply = null;
+      // 内容已全部显示：关掉加载气泡，bubbles 保留到重拉完成（驱动收尾时通常已关掉，已关就不再写 store）
+      set((s) =>
+        s.streaming?.controller !== controller || (!s.streaming.pending && !s.streaming.typing)
+          ? s
+          : { streaming: { ...s.streaming, typing: false, pending: false } },
+      );
+      // reset()（退出登录 / 删除全部对话）已中止本次回复并清空 streaming，之后还可能开始了新的回复：
+      // 这段回复不再属于当前状态，不重拉
+      if (get().streaming?.controller !== controller) return;
       // ⚠️ 走到这里服务端一定已落库：[DONE] 在后端 finally 之后才发，stopGeneration 也在 stop 返回后才 abort；
       // 持久化结果与 streaming=null 在同一次 set 里落地，列表不会渲染"临时气泡 + 持久化消息"并存的中间状态
       try {
         const page = await getMessages(conversationId);
         set((s) => {
-          if (s.streaming === null) return s;
+          if (s.streaming?.controller !== controller) return s;
           const { messages, hasMore } = mergeLatest(
             s.messagesByConversation[conversationId],
             page,
@@ -363,17 +516,21 @@ export const useChatStore = create<ChatState>()((set, get) => {
         });
       } catch (err) {
         toastError(err);
-        set({ streaming: null });
+        set((s) => (s.streaming?.controller !== controller ? s : { streaming: null }));
       }
     },
 
     // 💡 显式 stop 接口取代"abort 后立刻重拉"：服务端先落库再结束流，消除竞态，详见 docs/interview.md#abort-race
     stopGeneration: async () => {
       const streaming = get().streaming;
+      const reply = activeReply;
       // 没有回复在进行，或已经请求过停止
-      if (streaming === null || !streaming.pending) return;
-      // 立即收起加载气泡；之后到达的 [DONE] 不再把半行当作最后一个气泡
-      set({ streaming: { ...streaming, pending: false } });
+      if (streaming === null || reply === null) return;
+      activeReply = null;
+      // 立即显示与落库一致的行并收起加载气泡；之后到达的内容与 [DONE] 都被驱动忽略
+      const streamActive = reply.stop();
+      // 流已结束、只是还没写完：没有要停止的请求，sendMessage 接着重拉
+      if (!streamActive) return;
       try {
         await stopChat(streaming.conversationId);
       } catch (err) {
@@ -387,6 +544,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
     forgetMessages: () => set({ messagesByConversation: {}, hasMoreByConversation: {} }),
 
     reset: () => {
+      activeReply?.cancel();
+      activeReply = null;
       get().streaming?.controller.abort();
       set(INITIAL);
     },

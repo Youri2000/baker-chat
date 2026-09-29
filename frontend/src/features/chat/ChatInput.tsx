@@ -1,7 +1,7 @@
 /**
  * @file 底部输入面板：面板上方渐隐遮罩条 + 面板壳（顶部装饰图）+ contenteditable 胶囊输入框 + 表情 / 发送（停止）圆形按钮
  * + 表情弹层。键盘、粘贴、光标与表情插入、DOM 转文本等编辑行为都在 useChatComposer，本组件只负责布局、
- * 弹层开合与停止按钮；发送交给 chatStore.sendMessage，流式期间禁用输入并把发送按钮换成停止。
+ * 弹层开合与停止按钮；发送交给 chatStore.sendMessage（带上用户的打字机开关），流式期间禁用输入并把发送按钮换成停止。
  */
 import clsx from 'clsx';
 import { useEffect, useRef, useState } from 'react';
@@ -10,6 +10,7 @@ import { MATERIALS } from '@/constants/materials';
 import { useChatStore } from '@/features/chat/chatStore';
 import { EmojiPop } from '@/features/chat/EmojiPop';
 import { useChatComposer } from '@/features/chat/useChatComposer';
+import { useSettingsStore } from '@/features/settings/settingsStore';
 
 /** 45px 圆形按钮：hover 叠 20% 黑；禁用半透明 */
 const CIRCLE_BUTTON =
@@ -21,17 +22,20 @@ const BUTTON_ICON =
 
 /** 输入面板 */
 export function ChatInput() {
-  const streaming = useChatStore((s) => s.streaming);
+  // 只订阅"是否有回复在进行"：打字机逐字更新 streaming 时输入面板不跟着重渲染
+  const replying = useChatStore((s) => s.streaming !== null);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const stopGeneration = useChatStore((s) => s.stopGeneration);
+  // 设置还没加载时按默认值开启
+  const typewriter = useSettingsStore((s) => s.settings?.typewriter ?? true);
   const popRef = useRef<HTMLDivElement>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const [popOpen, setPopOpen] = useState(false);
 
   // 同一时刻只允许一条回复在进行：任何会话在流式回复时都禁用输入
-  const disabled = streaming !== null;
+  const disabled = replying;
   const { inputRef, handleKeyDown, handlePaste, insertEmoji, submit, keepInputFocus } =
-    useChatComposer({ onSend: sendMessage, disabled });
+    useChatComposer({ onSend: (text) => sendMessage(text, typewriter), disabled });
 
   // 弹层展开时，按下弹层与表情按钮以外的任何位置都收起（pointerdown 先于 click，按钮自身的点击照常执行）
   useEffect(() => {

@@ -1,6 +1,6 @@
 /**
  * @file 冒烟主流程：注册 → 29 张主卡 → 展开"陈千语"并选中子卡 → 输入两行文本 + 一个表情 → Enter 发送 →
- * mock 回复按行出现 3 个 AI 气泡 → 后端存储的文本与刷新后的气泡数量都与发送内容一致。
+ * mock 回复逐字写出、按行出现 3 个 AI 气泡 → 后端存储的文本与刷新后的气泡数量都与发送内容一致。
  * 主卡 / 子卡是 0×0 的 role=button 容器，Playwright 判定为不可见，用 dispatchEvent('click') 触发 React 的委托事件。
  */
 import { expect, test } from '@playwright/test';
@@ -42,13 +42,15 @@ test('注册后向陈千语发送多行带表情的消息，收到按行分段�
   await page.getByRole('button', { name: '[sns_emoji_001]', exact: true }).click();
   await page.keyboard.press('Enter');
 
-  // mock 每 80ms 发 5 个字，三行依次固化为气泡（气泡文字在 SVG foreignObject 里；
-  // 流结束后子卡预览也会显示最后一行，所以只在气泡范围内找）；结束后停止按钮换回发送按钮
+  // mock 每 80ms 发 5 个字，打字机默认开启：三行依次逐字写出、行间停顿 0.5 秒（气泡文字在 SVG foreignObject 里；
+  // 流结束后子卡预览也会显示最后一行，所以只在气泡范围内找）；全部写完后停止按钮换回发送按钮
   const bubbleTexts = page.locator('svg foreignObject > div');
   for (const line of MOCK_LINES) {
-    await expect(bubbleTexts.filter({ hasText: line })).toBeVisible();
+    await expect(bubbleTexts.filter({ hasText: line })).toBeVisible({ timeout: 15_000 });
   }
-  await expect(page.getByRole('button', { name: '发送', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '发送', exact: true })).toBeVisible({
+    timeout: 15_000,
+  });
   // 气泡顺序：我方 1 条在前，3 条 AI 按 mock 的行序在后
   await expect(bubbleTexts).toHaveCount(4);
   await expect(bubbleTexts.nth(1)).toHaveText(MOCK_LINES[0]);

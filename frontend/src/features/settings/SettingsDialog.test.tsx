@@ -1,5 +1,5 @@
 /**
- * @file 设置对话框测试：AI 配置的保存 / 恢复默认 / 连接测试两种结果与只读信息；世界观恢复默认；
+ * @file 设置对话框测试：AI 配置的保存 / 恢复默认 / 连接测试两种结果与只读信息、打字机开关切换即保存；世界观恢复默认；
  * 角色提示词默认选中当前会话角色、徽标显示、保存空值 PUT 后徽标消失；数据管理统计与二次确认；
  * 切换标签保留草稿；关于页退出登录清除 token。
  */
@@ -24,6 +24,7 @@ const SETTINGS: Settings = {
   world_setting_is_default: true,
   my_gender: 'male',
   strip_variant: 0,
+  typewriter: true,
   model: 'deepseek-flash',
   daily_limit: 100,
   daily_used: 3,
@@ -119,6 +120,24 @@ describe('SettingsDialog', () => {
     expect(screen.getByLabelText('温度 (0.8)')).toBeInTheDocument();
     expect(screen.getByLabelText('最大 Token 数')).toHaveValue(2048);
     await waitFor(() => expect(useSettingsStore.getState().settings?.max_tokens).toBe(2048));
+  });
+
+  /** 打字机开关：切换即 PATCH typewriter 一个字段，不经过"保存" */
+  it('打字机开关切换即保存', async () => {
+    const fetchMock = mockFetch((req) => {
+      if (req.method === 'PATCH') {
+        expect(req.body).toEqual({ typewriter: false });
+        return jsonResponse({ ...SETTINGS, typewriter: false });
+      }
+      return defaultHandler(req);
+    });
+    render(<SettingsDialog open onClose={vi.fn()} />);
+    const toggle = screen.getByRole('switch', { name: '打字机效果（AI 回复逐字写出）' });
+    expect(toggle).toBeChecked();
+    await userEvent.click(toggle);
+    expect(toggle).not.toBeChecked();
+    await waitFor(() => expect(useSettingsStore.getState().settings?.typewriter).toBe(false));
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1);
   });
 
   /** 连接测试成功 */

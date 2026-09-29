@@ -29,6 +29,7 @@ const OLD_SETTINGS: Settings = {
   world_setting_is_default: false,
   my_gender: 'female',
   strip_variant: 2,
+  typewriter: true,
   model: 'deepseek-flash',
   daily_limit: 100,
   daily_used: 9,
@@ -78,7 +79,13 @@ describe('authStore', () => {
     useAuthStore.setState({ token: 'jwt', user: { id: 1, username: 'demo' } });
     fillPreviousUserData();
     useChatStore.setState({
-      streaming: { conversationId: 7, bubbles: ['第一行'], pending: true, controller },
+      streaming: {
+        conversationId: 7,
+        bubbles: ['第一行'],
+        typing: false,
+        pending: true,
+        controller,
+      },
     });
 
     useAuthStore.getState().logout();

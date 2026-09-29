@@ -1,6 +1,7 @@
 /**
  * @file 设置 › AI 配置：温度滑块、最大 Token 数、只读的模型名与今日剩余额度，
- * 保存 / 连接测试 / 恢复默认。草稿在挂载时从 settings 同步，保存走 settingsStore.updateSettings。
+ * 保存 / 连接测试 / 恢复默认；打字机效果开关切换即保存，不受"保存"与"恢复默认"影响。
+ * 草稿在挂载时从 settings 同步，保存走 settingsStore.updateSettings。
  * 挂载时重新拉一次设置，让"今日剩余额度"反映最新发送数。
  */
 import clsx from 'clsx';
@@ -93,6 +94,16 @@ export function AiConfigTab({ settings }: AiConfigTabProps) {
           className={clsx(CONTROL_CLASS, 'px-3 py-2 text-[14px]')}
           onChange={(e) => setMaxTokens(e.target.value)}
         />
+      </label>
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          role="switch"
+          checked={settings.typewriter}
+          className="h-4 w-4 accent-accent"
+          onChange={(e) => void updateSettings({ typewriter: e.target.checked })}
+        />
+        <span className="text-[14px] text-text-primary">打字机效果（AI 回复逐字写出）</span>
       </label>
       <div className="flex flex-col gap-1">
         <span className={LABEL_CLASS}>模型</span>

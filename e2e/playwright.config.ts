@@ -1,7 +1,7 @@
 /**
  * @file Playwright 配置：只跑 chromium；运行前由 webServer 拉起后端（AI_MOCK=1、独立的临时 SQLite）与前端 Vite，
  * 端口固定为 8020 / 5180，用例通过 baseURL 访问前端，通过 metadata.backendUrl 直接查后端接口核对持久化结果。
- * 💡 测试金字塔的顶层：真实浏览器只跑 auth、smoke 与长会话滚动三条，行为覆盖交给 Vitest / pytest，
+ * 💡 测试金字塔的顶层：真实浏览器只跑 auth、smoke、打字机与长会话滚动四条，行为覆盖交给 Vitest / pytest，
  * 本地与 CI 逐字同命令，详见 docs/interview.md#test-pyramid
  */
 import { existsSync } from 'node:fs';

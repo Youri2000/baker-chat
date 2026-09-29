@@ -140,7 +140,7 @@ describe('chatStore 消息分页', () => {
     const { state, sse } = setupServer(range(1, 120));
     await useChatStore.getState().selectConversation(1);
     await useChatStore.getState().loadEarlierMessages(1);
-    const sending = useChatStore.getState().sendMessage('在吗');
+    const sending = useChatStore.getState().sendMessage('在吗', false);
     await flush();
     expect(loadedIds().at(-1)).toBeLessThan(0);
     state.messages = range(1, 124);
@@ -156,7 +156,7 @@ describe('chatStore 消息分页', () => {
   it('回复超过一页时只保留最新一页', async () => {
     const { state, sse } = setupServer(range(1, 120));
     await useChatStore.getState().selectConversation(1);
-    const sending = useChatStore.getState().sendMessage('在吗');
+    const sending = useChatStore.getState().sendMessage('在吗', false);
     await flush();
     state.messages = range(1, 180);
     sse.push('data: [DONE]\n\n');

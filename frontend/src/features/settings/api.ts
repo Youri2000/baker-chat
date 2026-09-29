@@ -12,6 +12,8 @@ export interface Settings {
   world_setting_is_default: boolean;
   my_gender: 'male' | 'female';
   strip_variant: 0 | 1 | 2;
+  /** AI 回复逐字输出（打字机效果）；关闭时整行显示 */
+  typewriter: boolean;
   model: string;
   daily_limit: number;
   daily_used: number;
@@ -19,7 +21,10 @@ export interface Settings {
 
 /** 可修改的字段；world_setting 传空串表示恢复默认 */
 export type SettingsPatch = Partial<
-  Pick<Settings, 'temperature' | 'max_tokens' | 'world_setting' | 'my_gender' | 'strip_variant'>
+  Pick<
+    Settings,
+    'temperature' | 'max_tokens' | 'world_setting' | 'my_gender' | 'strip_variant' | 'typewriter'
+  >
 >;
 
 /** 角色提示词 */

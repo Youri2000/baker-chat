@@ -27,7 +27,7 @@ export interface StreamSseOptions {
 
 /**
  * 按 `\n` 切出已完整到达的行：每行去首尾空白、跳过空行；最后一个未以换行结束的片段作为 rest 返回。
- * SSE 帧与 AI 回复文本的按行分段都用它。
+ * 用于 SSE 帧的按行解析；AI 回复文本的分行由 features/chat/typewriter.ts 的 readSource 负责（规则相同，另外要处理未收完的行）。
  */
 export function takeCompletedLines(buffer: string): { lines: string[]; rest: string } {
   const parts = buffer.split('\n');
@@ -60,7 +60,8 @@ function dispatchLine(line: string, options: StreamSseOptions): boolean {
 
 /**
  * ✅ POST 一个 JSON body 并消费 SSE 响应，直到流结束或被 abort；path 与 http() 同样不含 `/api`。
- * 非 2xx 时抛 ApiError（如 429 今日额度已用完）；abort 后静默返回且不再触发任何回调。
+ * 非 2xx 时抛 ApiError（如 429 今日额度已用完）；读取过程中被 abort 时静默返回且不再触发任何回调，
+ * 响应头到达之前就被 abort 时 fetch 以 AbortError 拒绝，由调用方的 catch 处理。
  */
 export async function streamSse(
   path: string,
