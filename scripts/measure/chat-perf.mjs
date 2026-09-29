@@ -20,6 +20,10 @@
  * （开始 / 结束时间、传输字节、gzip 字节）、/me 请求开始时间、已登录 / 时 ChatPage chunk 的开始时间及它减去
  * /me 开始时间的差值、导航开始到聊天页挂载（设置按钮与 29 张主卡都已渲染）、空闲后打开设置弹窗的耗时，
  * 以及登录页点击"登录"到聊天页挂载的耗时；--network slow4g 叠加慢速 4G 限速。
+ * --typing 模式改测 AI 回复显示期间的帧时长（需要后端 AI_MOCK=1）：在 --typing-character 角色的第一段会话里，
+ * 分别以打字机开启与关闭（经 PATCH /api/settings 切换）、各 CPU 降速倍率发送一条消息，从按下 Enter 到回复全部显示
+ * （停止按钮换回发送按钮）全程用 requestAnimationFrame 采样帧间隔，输出回复耗时、帧 p50 / p95 / 最大值、超过 20 / 33 ms
+ * 的帧数与 Long Animation Frames；结束后清空该会话的消息与上下文，并把打字机开关恢复为测量前的值。
  * 结果写入 --out 指定的 JSON 文件，Markdown 表格输出到 stdout，进度输出到 stderr。
  * 依赖 e2e 工作区安装的 @playwright/test 与它的 Chromium。
  * 复现（前端以 VITE_API_BASE_URL 指向后端构建后用 vite preview 启动；后端已用 seed-messages.py 写好数据，
@@ -28,6 +32,8 @@
  *     --sizes 100:诀,500:卡缪,2000:弭弗 --cpu 1,4 --runs 5 --out chat-perf.json
  *   node scripts/measure/chat-perf.mjs --lazy --base http://127.0.0.1:5781 --api http://127.0.0.1:8781 \
  *     --runs 5 --network none --out chat-perf-lazy.json
+ *   node scripts/measure/chat-perf.mjs --typing --base http://127.0.0.1:5781 --api http://127.0.0.1:8781 \
+ *     --cpu 1,4 --runs 5 --out chat-perf-typing.json
  */
 import { writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -51,6 +57,8 @@ const { values: args } = parseArgs({
     runs: { type: 'string', default: '5' },
     'wheel-step': { type: 'string', default: '300' },
     lazy: { type: 'boolean', default: false },
+    typing: { type: 'boolean', default: false },
+    'typing-character': { type: 'string', default: '洛茜' },
     network: { type: 'string', default: 'none' },
     out: { type: 'string', default: 'chat-perf.json' },
   },
@@ -81,7 +89,7 @@ async function api(method, path, token, body) {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`${method} ${path} -> ${res.status} ${await res.text()}`);
-  return res.json();
+  return res.status === 204 ? null : res.json();
 }
 
 /** 中位数 */
@@ -705,6 +713,93 @@ async function runLazy(browser, token) {
   return { network: args.network, entry, summary, runs: { login, home } };
 }
 
+/** --typing：一次测量。打开会话 → 降速 → 采样帧间隔 → 发送 → 等回复全部显示 → 汇总 */
+async function measureTyping(browser, token, conversationId, typewriter, cpu) {
+  await api('PATCH', '/api/settings', token, { typewriter });
+  const context = await browser.newContext({ viewport: VIEWPORT });
+  await context.addInitScript((jwt) => localStorage.setItem('baker.token', jwt), token);
+  const page = await context.newPage();
+  const cdp = await context.newCDPSession(page);
+  try {
+    await page.goto(`${args.base}/`);
+    await (await firstSubCard(page, args['typing-character'])).dispatchEvent('click');
+    await page.locator(SCROLLER).waitFor({ state: 'attached' });
+    await page.evaluate(() => Promise.all([...document.fonts].map((font) => font.load())));
+    const input = page.getByRole('textbox', { name: '发消息输入框' });
+    await input.click();
+    await page.keyboard.type('你好');
+    await page.waitForTimeout(400);
+    if (cpu > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpu });
+    await page.evaluate(startFrameSampler, SCROLLER);
+    const start = Date.now();
+    await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: '停止', exact: true }).waitFor();
+    await page.getByRole('button', { name: '发送', exact: true }).waitFor({ timeout: 60_000 });
+    const replyMs = Date.now() - start;
+    const frames = await page.evaluate(stopFrameSampler);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+    return { replyMs, frames };
+  } finally {
+    await context.close();
+    await api('POST', `/api/conversations/${conversationId}/messages/clear`, token);
+    await api('POST', `/api/conversations/${conversationId}/context/clear`, token);
+  }
+}
+
+/** --typing：打字机开启 / 关闭 × 各降速倍率各测 --runs 次，打印中位数表与各次原始值 */
+async function runTyping(browser, token) {
+  const conversations = await api('GET', '/api/conversations', token);
+  const conversation = conversations.find((c) => c.character_name === args['typing-character']);
+  const { typewriter: original } = await api('GET', '/api/settings', token);
+  const cpus = args.cpu.split(',').map(Number);
+  const results = [];
+  try {
+    for (const typewriter of [true, false]) {
+      for (const cpu of cpus) {
+        const runs = [];
+        for (let i = 0; i < Number(args.runs); i += 1) {
+          const run = await measureTyping(browser, token, conversation.id, typewriter, cpu);
+          console.error(
+            `${typewriter ? '打字机' : '整行'} · ${cpu}× · 第 ${i + 1} 次：回复 ${run.replyMs} ms，` +
+              `帧 p95 ${round1(run.frames.p95)} ms，>33 ms ${run.frames.over33} 帧`,
+          );
+          runs.push(run);
+        }
+        results.push({ typewriter, cpu, median: medianOf(runs), runs });
+      }
+    }
+  } finally {
+    await api('PATCH', '/api/settings', token, { typewriter: original });
+  }
+  console.log(
+    row([
+      '显示方式',
+      'CPU',
+      '回复耗时（Enter → 全部显示）',
+      '帧数',
+      '帧 p50 / p95 / max',
+      '>20 / >33 ms 帧',
+      'LoAF 次数 / 最长',
+    ]),
+  );
+  console.log(row(Array(7).fill('---')));
+  for (const r of results) {
+    const f = r.median.frames;
+    console.log(
+      row([
+        r.typewriter ? '打字机' : '整行',
+        `${r.cpu}×`,
+        `${r.median.replyMs} ms`,
+        f.frames,
+        `${f.p50} / ${f.p95} / ${f.max} ms`,
+        `${f.over20} / ${f.over33}`,
+        `${f.loafCount} / ${f.loafMax} ms`,
+      ]),
+    );
+  }
+  return results;
+}
+
 /** 登录拿 token，按模式测量并写出 JSON */
 async function main() {
   if (!(args.network in NETWORK)) throw new Error(`--network 只能是 ${Object.keys(NETWORK)}`);
@@ -722,12 +817,14 @@ async function main() {
       viewport: VIEWPORT,
       runs: Number(args.runs),
     };
-    const result = args.lazy
-      ? { meta, lazy: await runLazy(browser, token) }
-      : {
-          meta: { ...meta, wheelStep: Number(args['wheel-step']) },
-          ...(await runPerf(browser, token)),
-        };
+    const result = args.typing
+      ? { meta, typing: await runTyping(browser, token) }
+      : args.lazy
+        ? { meta, lazy: await runLazy(browser, token) }
+        : {
+            meta: { ...meta, wheelStep: Number(args['wheel-step']) },
+            ...(await runPerf(browser, token)),
+          };
     writeFileSync(args.out, `${JSON.stringify(result, null, 2)}\n`);
     console.error(`\n结果已写入 ${args.out}`);
   } finally {
